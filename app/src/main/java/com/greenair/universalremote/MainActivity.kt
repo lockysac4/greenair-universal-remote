@@ -6,10 +6,17 @@ import android.hardware.ConsumerIrManager
 import android.graphics.Color
 import android.view.Gravity
 import android.widget.*
+import android.os.Handler
+import android.os.Looper
 
 class MainActivity : Activity() {
     private lateinit var ir: ConsumerIrManager
     private lateinit var status: TextView
+    private lateinit var autoButton: Button
+    private val handler = Handler(Looper.getMainLooper())
+    private var searching = false
+    private var searchIndex = 0
+    private val powerCodes = buildList { for (a in listOf(0x00,0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80)) for (c in listOf(0x45,0x46,0x47,0x44,0x40,0x43,0x07,0x15,0x09,0x16,0x19,0x0D,0x0C,0x18,0x5E,0x08,0x1C,0x5A,0x42,0x52)) add(a to c) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,6 +56,31 @@ class MainActivity : Activity() {
         root.addView(button("TEST IR / POWER CODE") { sendNec(0x00, 0x45) }, LinearLayout.LayoutParams(-1, 130))
         root.addView(text("v0.1.0 • hardware test build\nNext: brand database + saved remotes + Wi-Fi TVs", 14f))
         setContentView(root)
+    }
+
+    private fun startSearch() {
+        if (!ir.hasIrEmitter()) return
+        searching = true; searchIndex = 0; autoButton.text = "STOP AUTO SEARCH"; runNextCode()
+    }
+    private fun runNextCode() {
+        if (!searching) return
+        if (searchIndex >= powerCodes.size) { stopSearch(); status.text = "Search complete - no NEC match"; return }
+        val code = powerCodes[searchIndex]
+        status.text = "Searching " + (searchIndex + 1) + "/" + powerCodes.size
+        sendNec(code.first, code.second)
+        searchIndex++
+        handler.postDelayed({ runNextCode() }, 1500)
+    }
+    private fun stopSearch() {
+        searching = false; handler.removeCallbacksAndMessages(null); autoButton.text = "START AUTO SEARCH"
+    }
+    private fun saveCurrentCode() {
+        if (searchIndex == 0) return
+        val code = powerCodes[(searchIndex - 1).coerceIn(powerCodes.indices)]
+        getSharedPreferences("remote", MODE_PRIVATE).edit().putInt("address", code.first).putInt("power", code.second).apply()
+        stopSearch()
+        status.text = "TV power code saved"
+        Toast.makeText(this, "TV power code saved", Toast.LENGTH_SHORT).show()
     }
 
     private fun sendNec(address: Int, command: Int) {
