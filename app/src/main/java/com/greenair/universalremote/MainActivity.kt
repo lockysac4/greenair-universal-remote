@@ -1,0 +1,72 @@
+package com.greenair.universalremote
+
+import android.app.Activity
+import android.os.Bundle
+import android.hardware.ConsumerIrManager
+import android.graphics.Color
+import android.view.Gravity
+import android.widget.*
+
+class MainActivity : Activity() {
+    private lateinit var ir: ConsumerIrManager
+    private lateinit var status: TextView
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        ir = getSystemService(CONSUMER_IR_SERVICE) as ConsumerIrManager
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(28, 32, 28, 24)
+            setBackgroundColor(Color.rgb(16, 16, 16))
+        }
+        fun text(s: String, size: Float) = TextView(this).apply {
+            text = s; textSize = size; setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER; setPadding(8, 12, 8, 12)
+        }
+        fun button(s: String, action: () -> Unit) = Button(this).apply {
+            text = s; textSize = 18f; setOnClickListener { action() }
+        }
+
+        root.addView(text("GREENAIR UNIVERSAL REMOTE", 24f))
+        status = text(if (ir.hasIrEmitter()) "IR transmitter detected ✓" else "No Android IR transmitter detected", 16f)
+        root.addView(status)
+        root.addView(button("POWER") { sendNec(0x00, 0x45) }, LinearLayout.LayoutParams(-1, 150))
+
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("VOL +" to 0x46, "MUTE" to 0x47, "CH +" to 0x44).forEach { (n, c) ->
+            row.addView(button(n) { sendNec(0x00, c) }, LinearLayout.LayoutParams(0, 130, 1f))
+        }
+        root.addView(row)
+
+        val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("VOL -" to 0x15, "HOME" to 0x09, "CH -" to 0x07).forEach { (n, c) ->
+            row2.addView(button(n) { sendNec(0x00, c) }, LinearLayout.LayoutParams(0, 130, 1f))
+        }
+        root.addView(row2)
+
+        root.addView(text("TV code search", 18f))
+        root.addView(button("TEST IR / POWER CODE") { sendNec(0x00, 0x45) }, LinearLayout.LayoutParams(-1, 130))
+        root.addView(text("v0.1.0 • hardware test build\nNext: brand database + saved remotes + Wi-Fi TVs", 14f))
+        setContentView(root)
+    }
+
+    private fun sendNec(address: Int, command: Int) {
+        if (!ir.hasIrEmitter()) {
+            Toast.makeText(this, "IR emitter not exposed by Android", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val bits = mutableListOf<Int>()
+        fun addByte(v: Int) { for (i in 0..7) bits.add((v shr i) and 1) }
+        addByte(address); addByte(address xor 0xFF); addByte(command); addByte(command xor 0xFF)
+        val p = mutableListOf(9000, 4500)
+        bits.forEach { b -> p.add(560); p.add(if (b == 1) 1690 else 560) }
+        p.add(560)
+        try {
+            ir.transmit(38000, p.toIntArray())
+            Toast.makeText(this, "IR sent", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "IR error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+}
