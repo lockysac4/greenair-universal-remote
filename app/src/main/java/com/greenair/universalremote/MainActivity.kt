@@ -78,70 +78,79 @@ class MainActivity : Activity() {
         autoButton = actionButton("START AUTO SEARCH") { if (searching) stopSearch() else startSearch() }
         root.addView(autoButton, LinearLayout.LayoutParams(-1,125))
         root.addView(actionButton("TV RESPONDED - STOP & SAVE") { saveCurrentCode() }, LinearLayout.LayoutParams(-1,125))
-        root.addView(label("v0.4.0 • Remote Codes tab added", 14f))
+        root.addView(label("v0.5.0 • Simplified code entry", 14f))
         return root
     }
 
     private fun buildCodesView(): View {
         val root = column()
-        root.addView(label("MANUAL / RAW IR CODES", 21f))
-        root.addView(label("Enter NEC address + command, or paste a raw pulse pattern.", 15f))
+        root.addView(label("SIMPLE REMOTE CODES", 21f))
+        root.addView(label("Enter a button code. Use Advanced only when a code needs special settings.", 15f))
 
-        val brand = field("Brand / remote name (e.g. TCL)")
-        val buttonName = field("Button name (e.g. POWER)")
-        val frequency = field("Frequency Hz (default 38000)")
-        val address = field("NEC address: 0x00 or 00")
-        val command = field("NEC command: 0x45 or 45")
-        val raw = field("Raw pulses: 9000,4500,560,1690,...", 5)
-        listOf(brand,buttonName,frequency,address,command,raw).forEach { root.addView(it) }
+        val brand = field("Brand / remote name")
+        val buttonName = field("Button name")
+        val code = field("Code e.g. 45, 0x45, or raw pulses")
+        listOf(brand, buttonName, code).forEach { root.addView(it) }
+
+        val advanced = column().apply { visibility = View.GONE }
+        val frequency = field("Frequency Hz")
+        val address = field("NEC address")
+        val raw = field("Raw pulse pattern", 5)
+        listOf(frequency, address, raw).forEach { advanced.addView(it) }
 
         val prefs = getSharedPreferences("custom_codes", MODE_PRIVATE)
-        brand.setText(prefs.getString("brand","TCL"))
-        buttonName.setText(prefs.getString("button","POWER"))
-        frequency.setText(prefs.getInt("frequency",38000).toString())
-        address.setText(prefs.getString("address","00"))
-        command.setText(prefs.getString("command","45"))
-        raw.setText(prefs.getString("raw",""))
+        brand.setText(prefs.getString("brand", "TCL"))
+        buttonName.setText(prefs.getString("button", "POWER"))
+        code.setText(prefs.getString("simple_code", prefs.getString("command", "45")))
+        frequency.setText(prefs.getInt("frequency", 38000).toString())
+        address.setText(prefs.getString("address", "00"))
+        raw.setText(prefs.getString("raw", ""))
+
+        val advancedButton = actionButton("ADVANCED ▼") {
+            advanced.visibility = if (advanced.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        root.addView(advancedButton, LinearLayout.LayoutParams(-1, 110))
+        root.addView(advanced)
 
         val result = label("Ready", 15f)
-        root.addView(actionButton("TEST CODE") {
-            try {
-                val hz = frequency.text.toString().trim().toIntOrNull() ?: 38000
-                val rawText = raw.text.toString().trim()
-                if (rawText.isNotEmpty()) {
-                    val pulses = parseRaw(rawText)
-                    ir.transmit(hz, pulses)
-                    result.text = "Raw IR sent: ${pulses.size} pulses @ ${hz}Hz"
-                } else {
-                    val a = parseHex(address.text.toString())
-                    val c = parseHex(command.text.toString())
-                    sendNec(a,c)
-                    result.text = "NEC sent: addr=0x${a.toString(16).uppercase().padStart(2,'0')} cmd=0x${c.toString(16).uppercase().padStart(2,'0')}"
-                }
-            } catch (e: Exception) {
-                result.text = "Code error: ${e.message}"
+        fun sendEnteredCode() {
+            val entered = code.text.toString().trim()
+            require(entered.isNotEmpty()) { "Enter a code" }
+            val hz = frequency.text.toString().trim().toIntOrNull() ?: 38000
+            val rawText = raw.text.toString().trim()
+            val looksRaw = entered.contains(",") || entered.contains(";") || entered.trim().contains(" ")
+            if (rawText.isNotEmpty() || looksRaw) {
+                val pulses = parseRaw(if (rawText.isNotEmpty()) rawText else entered)
+                ir.transmit(hz, pulses)
+                result.text = "Raw code sent"
+            } else {
+                val a = parseHex(address.text.toString().ifBlank { "00" })
+                val c = parseHex(entered)
+                sendNec(a, c, hz)
+                result.text = "Code sent: 0x${c.toString(16).uppercase().padStart(2,'0')}"
             }
-        }, LinearLayout.LayoutParams(-1,125))
+        }
+
+        root.addView(actionButton("TEST CODE") {
+            try { sendEnteredCode() }
+            catch (e: Exception) { result.text = "Code error: ${e.message}" }
+        }, LinearLayout.LayoutParams(-1, 125))
 
         root.addView(actionButton("SAVE CODE") {
             val hz = frequency.text.toString().trim().toIntOrNull() ?: 38000
             prefs.edit()
-                .putString("brand",brand.text.toString().trim())
-                .putString("button",buttonName.text.toString().trim())
-                .putInt("frequency",hz)
-                .putString("address",address.text.toString().trim())
-                .putString("command",command.text.toString().trim())
-                .putString("raw",raw.text.toString().trim()).apply()
+                .putString("brand", brand.text.toString().trim())
+                .putString("button", buttonName.text.toString().trim())
+                .putString("simple_code", code.text.toString().trim())
+                .putInt("frequency", hz)
+                .putString("address", address.text.toString().trim().ifBlank { "00" })
+                .putString("raw", raw.text.toString().trim()).apply()
             result.text = "Saved: ${brand.text} • ${buttonName.text}"
-            Toast.makeText(this,"Remote code saved",Toast.LENGTH_SHORT).show()
-        }, LinearLayout.LayoutParams(-1,125))
+            Toast.makeText(this, "Remote code saved", Toast.LENGTH_SHORT).show()
+        }, LinearLayout.LayoutParams(-1, 125))
 
-        root.addView(actionButton("CLEAR FIELDS") {
-            buttonName.setText(""); address.setText(""); command.setText(""); raw.setText("")
-            result.text = "Fields cleared"
-        }, LinearLayout.LayoutParams(-1,115))
         root.addView(result)
-        root.addView(label("Formats accepted\nNEC: address 00 + command 45\nRaw: comma/space separated pulse timings in microseconds",14f))
+        root.addView(label("Most codes only need the Code box. Examples: 45 or 0x45", 14f))
         return root
     }
 
@@ -194,7 +203,7 @@ class MainActivity : Activity() {
         stopSearch(); status.text="TV power code saved"
         Toast.makeText(this,"TV power code saved",Toast.LENGTH_SHORT).show()
     }
-    private fun sendNec(address:Int, command:Int) {
+    private fun sendNec(address:Int, command:Int, frequency:Int = 38000) {
         if (!ir.hasIrEmitter()) { Toast.makeText(this,"IR emitter not exposed by Android",Toast.LENGTH_SHORT).show(); return }
         val bits=mutableListOf<Int>()
         fun addByte(v:Int){ for(i in 0..7) bits.add((v shr i) and 1) }
@@ -202,7 +211,7 @@ class MainActivity : Activity() {
         val p=mutableListOf(9000,4500)
         bits.forEach { b -> p.add(560); p.add(if(b==1)1690 else 560) }
         p.add(560)
-        try { ir.transmit(38000,p.toIntArray()) }
+        try { ir.transmit(frequency,p.toIntArray()) }
         catch(e:Exception){ Toast.makeText(this,"IR error: ${e.message}",Toast.LENGTH_LONG).show() }
     }
 }
