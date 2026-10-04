@@ -156,7 +156,7 @@ class MainActivity : Activity() {
         text=s; textSize=17f; setOnClickListener { action() }
     }
     private fun field(hintText:String, lines:Int=1) = EditText(this).apply {
-        hint=hintText; hintTextColor=Color.LTGRAY; setTextColor(Color.WHITE); textSize=16f
+        hint=hintText; setHintTextColor(Color.LTGRAY); setTextColor(Color.WHITE); textSize=16f
         setPadding(14,12,14,12); minLines=lines; if(lines>1) gravity=Gravity.TOP
     }
     private fun parseHex(s:String):Int {
