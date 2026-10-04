@@ -53,8 +53,12 @@ class MainActivity : Activity() {
         root.addView(row2)
 
         root.addView(text("TV code search", 18f))
-        root.addView(button("TEST IR / POWER CODE") { sendNec(0x00, 0x45) }, LinearLayout.LayoutParams(-1, 130))
-        root.addView(text("v0.1.0 • hardware test build\nNext: brand database + saved remotes + Wi-Fi TVs", 14f))
+        autoButton = button("START AUTO SEARCH") {
+            if (searching) stopSearch() else startSearch()
+        }
+        root.addView(autoButton, LinearLayout.LayoutParams(-1, 130))
+        root.addView(button("TV RESPONDED - STOP & SAVE") { saveCurrentCode() }, LinearLayout.LayoutParams(-1, 130))
+        root.addView(text("v0.2.0 • automatic IR search build\nAuto-search + saved TV power code", 14f))
         setContentView(root)
     }
 
