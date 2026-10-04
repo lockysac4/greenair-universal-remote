@@ -16,7 +16,7 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var searching = false
     private var searchIndex = 0
-    private val powerCodes = buildList { for (a in listOf(0x00,0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80)) for (c in listOf(0x45,0x46,0x47,0x44,0x40,0x43,0x07,0x15,0x09,0x16,0x19,0x0D,0x0C,0x18,0x5E,0x08,0x1C,0x5A,0x42,0x52)) add(a to c) }
+    private val powerCodes = buildList { for (a in 0x00..0xFF) for (c in listOf(0x45,0x46,0x47,0x44,0x40,0x43,0x07,0x15,0x09,0x16,0x19,0x0D,0x0C,0x18,0x5E,0x08,0x1C,0x5A,0x42,0x52,0x12,0x14,0x18,0x0F,0x57,0x17,0x1A,0x1B,0x1D,0x1F,0x4C,0x4D,0x54)) add(a to c) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,13 +52,13 @@ class MainActivity : Activity() {
         }
         root.addView(row2)
 
-        root.addView(text("TV code search", 18f))
+        root.addView(text("TCL / Universal TV code search", 18f))
         autoButton = button("START AUTO SEARCH") {
             if (searching) stopSearch() else startSearch()
         }
         root.addView(autoButton, LinearLayout.LayoutParams(-1, 130))
         root.addView(button("TV RESPONDED - STOP & SAVE") { saveCurrentCode() }, LinearLayout.LayoutParams(-1, 130))
-        root.addView(text("v0.2.0 • automatic IR search build\nAuto-search + saved TV power code", 14f))
+        root.addView(text("v0.3.0 • TCL expanded IR search\nDisplays address + command while searching", 14f))
         setContentView(root)
     }
 
@@ -70,10 +70,10 @@ class MainActivity : Activity() {
         if (!searching) return
         if (searchIndex >= powerCodes.size) { stopSearch(); status.text = "Search complete - no NEC match"; return }
         val code = powerCodes[searchIndex]
-        status.text = "Searching " + (searchIndex + 1) + "/" + powerCodes.size
+        status.text = "TCL search " + (searchIndex + 1) + "/" + powerCodes.size + "  NEC addr=0x" + code.first.toString(16).uppercase().padStart(2, '0') + " cmd=0x" + code.second.toString(16).uppercase().padStart(2, '0')
         sendNec(code.first, code.second)
         searchIndex++
-        handler.postDelayed({ runNextCode() }, 1500)
+        handler.postDelayed({ runNextCode() }, 900)
     }
     private fun stopSearch() {
         searching = false; handler.removeCallbacksAndMessages(null); autoButton.text = "START AUTO SEARCH"
