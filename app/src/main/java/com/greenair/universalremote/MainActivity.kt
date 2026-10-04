@@ -78,79 +78,27 @@ class MainActivity : Activity() {
         autoButton = actionButton("START AUTO SEARCH") { if (searching) stopSearch() else startSearch() }
         root.addView(autoButton, LinearLayout.LayoutParams(-1,125))
         root.addView(actionButton("TV RESPONDED - STOP & SAVE") { saveCurrentCode() }, LinearLayout.LayoutParams(-1,125))
-        root.addView(label("v0.5.0 • Simplified code entry", 14f))
+        root.addView(label("v0.6.1 • Simple remote codes", 14f))
         return root
     }
 
     private fun buildCodesView(): View {
         val root = column()
-        root.addView(label("SIMPLE REMOTE CODES", 21f))
-        root.addView(label("Enter a button code. Use Advanced only when a code needs special settings.", 15f))
+        root.addView(label("REMOTE CODES", 23f))
+        root.addView(label("Try these common TV setup codes for your brand.", 16f))
 
-        val brand = field("Brand / remote name")
-        val buttonName = field("Button name")
-        val code = field("Code e.g. 45, 0x45, or raw pulses")
-        listOf(brand, buttonName, code).forEach { root.addView(it) }
-
-        val advanced = column().apply { visibility = View.GONE }
-        val frequency = field("Frequency Hz")
-        val address = field("NEC address")
-        val raw = field("Raw pulse pattern", 5)
-        listOf(frequency, address, raw).forEach { advanced.addView(it) }
-
-        val prefs = getSharedPreferences("custom_codes", MODE_PRIVATE)
-        brand.setText(prefs.getString("brand", "TCL"))
-        buttonName.setText(prefs.getString("button", "POWER"))
-        code.setText(prefs.getString("simple_code", prefs.getString("command", "45")))
-        frequency.setText(prefs.getInt("frequency", 38000).toString())
-        address.setText(prefs.getString("address", "00"))
-        raw.setText(prefs.getString("raw", ""))
-
-        val advancedButton = actionButton("ADVANCED ▼") {
-            advanced.visibility = if (advanced.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-        }
-        root.addView(advancedButton, LinearLayout.LayoutParams(-1, 110))
-        root.addView(advanced)
-
-        val result = label("Ready", 15f)
-        fun sendEnteredCode() {
-            val entered = code.text.toString().trim()
-            require(entered.isNotEmpty()) { "Enter a code" }
-            val hz = frequency.text.toString().trim().toIntOrNull() ?: 38000
-            val rawText = raw.text.toString().trim()
-            val looksRaw = entered.contains(",") || entered.contains(";") || entered.trim().contains(" ")
-            if (rawText.isNotEmpty() || looksRaw) {
-                val pulses = parseRaw(if (rawText.isNotEmpty()) rawText else entered)
-                ir.transmit(hz, pulses)
-                result.text = "Raw code sent"
-            } else {
-                val a = parseHex(address.text.toString().ifBlank { "00" })
-                val c = parseHex(entered)
-                sendNec(a, c, hz)
-                result.text = "Code sent: 0x${c.toString(16).uppercase().padStart(2,'0')}"
-            }
+        val codes = listOf(
+            "Samsung" to "0060, 0812, 0702, 5021",
+            "LG" to "1840, 0178, 0037",
+            "Sony" to "0000, 0810, 1100",
+            "Panasonic" to "0051, 0250",
+            "Hisense" to "0156, 0209"
+        )
+        codes.forEach { (brand, values) ->
+            root.addView(label("$brand: $values", 19f))
         }
 
-        root.addView(actionButton("TEST CODE") {
-            try { sendEnteredCode() }
-            catch (e: Exception) { result.text = "Code error: ${e.message}" }
-        }, LinearLayout.LayoutParams(-1, 125))
-
-        root.addView(actionButton("SAVE CODE") {
-            val hz = frequency.text.toString().trim().toIntOrNull() ?: 38000
-            prefs.edit()
-                .putString("brand", brand.text.toString().trim())
-                .putString("button", buttonName.text.toString().trim())
-                .putString("simple_code", code.text.toString().trim())
-                .putInt("frequency", hz)
-                .putString("address", address.text.toString().trim().ifBlank { "00" })
-                .putString("raw", raw.text.toString().trim()).apply()
-            result.text = "Saved: ${brand.text} • ${buttonName.text}"
-            Toast.makeText(this, "Remote code saved", Toast.LENGTH_SHORT).show()
-        }, LinearLayout.LayoutParams(-1, 125))
-
-        root.addView(result)
-        root.addView(label("Most codes only need the Code box. Examples: 45 or 0x45", 14f))
+        root.addView(label("v0.6.1 • Simple remote code list", 14f))
         return root
     }
 
