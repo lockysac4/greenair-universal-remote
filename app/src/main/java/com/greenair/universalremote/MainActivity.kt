@@ -78,27 +78,71 @@ class MainActivity : Activity() {
         autoButton = actionButton("START AUTO SEARCH") { if (searching) stopSearch() else startSearch() }
         root.addView(autoButton, LinearLayout.LayoutParams(-1,125))
         root.addView(actionButton("TV RESPONDED - STOP & SAVE") { saveCurrentCode() }, LinearLayout.LayoutParams(-1,125))
-        root.addView(label("v0.6.1 • Simple remote codes", 14f))
+        root.addView(label("v0.6.2 • Saved remote codes", 14f))
         return root
     }
 
     private fun buildCodesView(): View {
         val root = column()
         root.addView(label("REMOTE CODES", 23f))
-        root.addView(label("Try these common TV setup codes for your brand.", 16f))
+        root.addView(label("Add and save your own remote setup codes.", 16f))
 
-        val codes = listOf(
-            "Samsung" to "0060, 0812, 0702, 5021",
-            "LG" to "1840, 0178, 0037",
-            "Sony" to "0000, 0810, 1100",
-            "Panasonic" to "0051, 0250",
-            "Hisense" to "0156, 0209"
-        )
-        codes.forEach { (brand, values) ->
-            root.addView(label("$brand: $values", 19f))
+        val brand = field("Brand / remote name")
+        val code = field("Remote code e.g. 0060")
+        root.addView(brand)
+        root.addView(code)
+
+        val savedTitle = label("SAVED CODES", 18f)
+        root.addView(savedTitle)
+        val savedList = column()
+        root.addView(savedList)
+
+        val prefs = getSharedPreferences("saved_remote_codes", MODE_PRIVATE)
+
+        fun refreshSavedCodes() {
+            savedList.removeAllViews()
+            val entries = prefs.all.entries
+                .map { it.key to (it.value?.toString() ?: "") }
+                .sortedBy { it.first.lowercase() }
+
+            if (entries.isEmpty()) {
+                savedList.addView(label("No codes saved yet", 15f))
+                return
+            }
+
+            entries.forEach { (savedBrand, savedCode) ->
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                val select = actionButton("$savedBrand: $savedCode") {
+                    brand.setText(savedBrand)
+                    code.setText(savedCode)
+                    Toast.makeText(this, "Loaded $savedBrand code $savedCode", Toast.LENGTH_SHORT).show()
+                }
+                val delete = actionButton("DELETE") {
+                    prefs.edit().remove(savedBrand).apply()
+                    refreshSavedCodes()
+                }
+                row.addView(select, LinearLayout.LayoutParams(0, 110, 1f))
+                row.addView(delete, LinearLayout.LayoutParams(250, 110))
+                savedList.addView(row)
+            }
         }
 
-        root.addView(label("v0.6.1 • Simple remote code list", 14f))
+        root.addView(actionButton("ADD / SAVE CODE") {
+            val b = brand.text.toString().trim()
+            val v = code.text.toString().trim()
+            if (b.isBlank() || v.isBlank()) {
+                Toast.makeText(this, "Enter a brand and code", Toast.LENGTH_SHORT).show()
+            } else {
+                prefs.edit().putString(b, v).apply()
+                Toast.makeText(this, "Saved $b code $v", Toast.LENGTH_SHORT).show()
+                brand.text.clear()
+                code.text.clear()
+                refreshSavedCodes()
+            }
+        }, LinearLayout.LayoutParams(-1, 125))
+
+        refreshSavedCodes()
+        root.addView(label("v0.6.2 • Add your own remote codes", 14f))
         return root
     }
 
