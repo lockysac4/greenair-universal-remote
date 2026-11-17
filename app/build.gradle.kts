@@ -10,6 +10,20 @@ android {
         versionCode = 8
         versionName = "0.6.3"
     }
+    flavorDimensions += "remote"
+    productFlavors {
+        create("universal") {
+            dimension = "remote"
+            resValue("string", "app_name", "Greenair Universal Remote")
+        }
+        create("philips") {
+            dimension = "remote"
+            applicationIdSuffix = ".philips"
+            versionCode = 1
+            versionName = "1.0.0"
+            resValue("string", "app_name", "Greenair Philips Remote")
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

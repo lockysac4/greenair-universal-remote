@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-feature android:name="android.hardware.consumerir" android:required="false" />
     <uses-permission android:name="android.permission.TRANSMIT_IR" />
-    <application android:theme="@style/AppTheme" android:label="Greenair Universal Remote">
+    <application android:theme="@style/AppTheme" android:label="@string/app_name">
         <activity android:name=".MainActivity" android:screenOrientation="portrait" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
