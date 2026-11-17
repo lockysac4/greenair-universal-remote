@@ -7,8 +7,8 @@ android {
         applicationId = "com.greenair.universalremote"
         minSdk = 23
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.6.2"
+        versionCode = 8
+        versionName = "0.6.3"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

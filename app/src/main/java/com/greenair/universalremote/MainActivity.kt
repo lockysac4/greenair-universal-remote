@@ -17,6 +17,7 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var searching = false
     private var searchIndex = 0
+    private var philipsToggle = false
     private val powerCodes = buildList { for (a in 0x00..0xFF) for (c in listOf(0x45,0x46,0x47,0x44,0x40,0x43,0x07,0x15,0x09,0x16,0x19,0x0D,0x0C,0x18,0x5E,0x08,0x1C,0x5A,0x42,0x52,0x12,0x14,0x0F,0x57,0x17,0x1A,0x1B,0x1D,0x1F,0x4C,0x4D,0x54)) add(a to c) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,12 +33,15 @@ class MainActivity : Activity() {
 
         val tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val remoteTab = Button(this).apply { text = "REMOTE" }
-        val codesTab = Button(this).apply { text = "REMOTE CODES" }
+        val codesTab = Button(this).apply { text = "CODES" }
+        val philipsTab = Button(this).apply { text = "PHILIPS" }
         tabs.addView(remoteTab, LinearLayout.LayoutParams(0, 115, 1f))
+        tabs.addView(philipsTab, LinearLayout.LayoutParams(0, 115, 1f))
         tabs.addView(codesTab, LinearLayout.LayoutParams(0, 115, 1f))
         root.addView(tabs)
 
         val remoteView = buildRemoteView()
+        val philipsView = buildPhilipsView()
         val codesView = buildCodesView()
         val scroll = ScrollView(this)
         scroll.addView(remoteView)
@@ -46,6 +50,11 @@ class MainActivity : Activity() {
         remoteTab.setOnClickListener {
             stopSearch()
             scroll.removeAllViews(); scroll.addView(remoteView)
+        }
+        philipsTab.setOnClickListener {
+            stopSearch()
+            scroll.removeAllViews()
+            scroll.addView(philipsView)
         }
         codesTab.setOnClickListener {
             stopSearch()
@@ -78,7 +87,63 @@ class MainActivity : Activity() {
         autoButton = actionButton("START AUTO SEARCH") { if (searching) stopSearch() else startSearch() }
         root.addView(autoButton, LinearLayout.LayoutParams(-1,125))
         root.addView(actionButton("TV RESPONDED - STOP & SAVE") { saveCurrentCode() }, LinearLayout.LayoutParams(-1,125))
-        root.addView(label("v0.6.2 • Saved remote codes", 14f))
+        root.addView(label("v0.6.3 • Saved remote codes", 14f))
+        return root
+    }
+
+    private fun buildPhilipsView(): View {
+        val root = column()
+        root.addView(label("Philips 22PFT5403/98", 21f))
+        root.addView(label("Aim at the TV and test Power. If it doesn’t respond, switch IR profiles.", 15f))
+
+        val prefs = getSharedPreferences("philips_remote", MODE_PRIVATE)
+        var protocol = if (prefs.getBoolean("use_rc5", false)) PhilipsProtocol.RC5 else PhilipsProtocol.RC6
+        val profiles = RadioGroup(this).apply {
+            orientation = RadioGroup.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        for (option in PhilipsProtocol.entries) {
+            val button = RadioButton(this).apply {
+                id = View.generateViewId()
+                text = option.label
+                setTextColor(Color.WHITE)
+            }
+            profiles.addView(button)
+            if (option == protocol) profiles.check(button.id)
+            button.setOnClickListener {
+                protocol = option
+                prefs.edit().putBoolean("use_rc5", option == PhilipsProtocol.RC5).apply()
+            }
+        }
+        root.addView(profiles)
+
+        fun send(command: Int) {
+            philipsToggle = !philipsToggle
+            transmit(PhilipsIr.CARRIER_HZ, PhilipsIr.encode(protocol, command, philipsToggle))
+        }
+
+        fun addRow(vararg keys: PhilipsKey) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (key in keys) {
+                val button = actionButton(key.label) {
+                    send(if (protocol == PhilipsProtocol.RC5) key.rc5 else key.rc6)
+                }
+                button.contentDescription = when (key) {
+                    PhilipsKey.UP, PhilipsKey.DOWN, PhilipsKey.LEFT, PhilipsKey.RIGHT ->
+                        key.name.lowercase().replaceFirstChar { it.uppercase() }
+                    else -> key.label
+                }
+                row.addView(button, LinearLayout.LayoutParams(0, 125, 1f))
+            }
+            root.addView(row, LinearLayout.LayoutParams(-1, -2))
+        }
+
+        addRow(PhilipsKey.POWER, PhilipsKey.SOURCE)
+        addRow(PhilipsKey.VOLUME_DOWN, PhilipsKey.MUTE, PhilipsKey.VOLUME_UP)
+        addRow(PhilipsKey.CHANNEL_DOWN, PhilipsKey.CHANNEL_UP)
+        addRow(PhilipsKey.MENU, PhilipsKey.UP, PhilipsKey.BACK)
+        addRow(PhilipsKey.LEFT, PhilipsKey.OK, PhilipsKey.RIGHT)
+        addRow(PhilipsKey.DOWN)
         return root
     }
 
@@ -142,7 +207,7 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, 125))
 
         refreshSavedCodes()
-        root.addView(label("v0.6.2 • Add your own remote codes", 14f))
+        root.addView(label("v0.6.3 • Add your own remote codes", 14f))
         return root
     }
 
@@ -196,14 +261,18 @@ class MainActivity : Activity() {
         Toast.makeText(this,"TV power code saved",Toast.LENGTH_SHORT).show()
     }
     private fun sendNec(address:Int, command:Int, frequency:Int = 38000) {
-        if (!ir.hasIrEmitter()) { Toast.makeText(this,"IR emitter not exposed by Android",Toast.LENGTH_SHORT).show(); return }
         val bits=mutableListOf<Int>()
         fun addByte(v:Int){ for(i in 0..7) bits.add((v shr i) and 1) }
         addByte(address); addByte(address xor 0xFF); addByte(command); addByte(command xor 0xFF)
         val p=mutableListOf(9000,4500)
         bits.forEach { b -> p.add(560); p.add(if(b==1)1690 else 560) }
         p.add(560)
-        try { ir.transmit(frequency,p.toIntArray()) }
+        transmit(frequency, p.toIntArray())
+    }
+
+    private fun transmit(frequency: Int, pattern: IntArray) {
+        if (!ir.hasIrEmitter()) { Toast.makeText(this,"IR emitter not exposed by Android",Toast.LENGTH_SHORT).show(); return }
+        try { ir.transmit(frequency, pattern) }
         catch(e:Exception){ Toast.makeText(this,"IR error: ${e.message}",Toast.LENGTH_LONG).show() }
     }
 }
