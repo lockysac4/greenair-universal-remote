@@ -2,6 +2,7 @@ package com.greenair.universalremote
 
 import android.app.Activity
 import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
@@ -12,6 +13,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -19,21 +21,31 @@ import com.greenair.universalremote.PhilipsKey.*
 
 class MainActivity : Activity() {
     private var ir: ConsumerIrManager? = null
+    private var hasEmitter = false
     private var toggle = false
     private lateinit var status: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ir = getSystemService(ConsumerIrManager::class.java)
+        hasEmitter = ir?.hasIrEmitter() == true
         toggle = savedInstanceState?.getBoolean("toggle") ?: false
 
-        val page = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(24), dp(20), dp(20))
+        val page = column().apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(10), dp(12), dp(10), dp(12))
         }
+        val remote = column().apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = shape(CASE, 34, CASE_EDGE)
+            setPadding(dp(16), dp(16), dp(16), dp(18))
+        }
+        val caseWidth = minOf(360, (resources.configuration.screenWidthDp - 20).coerceAtLeast(1))
+        page.addView(remote, LinearLayout.LayoutParams(dp(caseWidth), -2))
         val scroll = ScrollView(this).apply {
             setBackgroundColor(BACKGROUND)
             isFillViewport = true
+            isVerticalScrollBarEnabled = false
             addView(page)
         }
         setContentView(scroll)
@@ -42,6 +54,9 @@ class MainActivity : Activity() {
             scroll.setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
                 view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                remote.layoutParams = (remote.layoutParams as LinearLayout.LayoutParams).apply {
+                    width = minOf(dp(caseWidth), (resources.displayMetrics.widthPixels - bars.left - bars.right - dp(20)).coerceAtLeast(1))
+                }
                 insets
             }
             scroll.requestApplyInsets()
@@ -50,36 +65,48 @@ class MainActivity : Activity() {
             window.navigationBarColor = BACKGROUND
         }
 
-        page.addView(TextView(this).apply {
-            text = "Philips Remote"
-            textSize = 30f
-            setTextColor(TEXT)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isAccessibilityHeading = true
-        })
-        page.addView(TextView(this).apply {
-            text = "22PFT5403/98"
-            textSize = 16f
-            setTextColor(MUTED)
-            setPadding(0, dp(3), 0, dp(18))
-        })
+        val name = column().apply {
+            gravity = Gravity.CENTER
+            addView(label("PHILIPS", 17f, TEXT).apply {
+                letterSpacing = 0.13f
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isAccessibilityHeading = true
+            })
+            addView(label("22PFT5403/98", 11f, SECONDARY))
+        }
+        val header = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(button("⏻", "Power", POWER.rc6, POWER_RED, 26f), LinearLayout.LayoutParams(dp(50), dp(50)))
+            addView(name, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(button("Source", "Source", SOURCE.rc6, size = 13f), LinearLayout.LayoutParams(dp(66), -2))
+        }
+        addSection(remote, header)
 
-        status = TextView(this).apply {
-            textSize = 15f
-            setTextColor(MUTED)
+        status = label("", 14f, SECONDARY).apply {
             visibility = View.GONE
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
-        page.addView(status)
-        val hasEmitter = ir?.hasIrEmitter() == true
+        addSection(remote, status)
         if (!hasEmitter) showStatus("Android did not detect an infrared blaster.")
 
-        page.addView(row(hasEmitter, POWER, SOURCE))
-        page.addView(row(hasEmitter, VOLUME_DOWN, MUTE, VOLUME_UP))
-        page.addView(row(hasEmitter, CHANNEL_DOWN, CHANNEL_UP))
-        page.addView(row(hasEmitter, MENU, UP, BACK))
-        page.addView(row(hasEmitter, LEFT, OK, RIGHT))
-        page.addView(row(hasEmitter, null, DOWN, null))
+        addSection(remote, directionPad(), top = 14, width = dp(180))
+        addSection(remote, row(
+            button("Menu", "Menu", MENU.rc6),
+            button("Mute", "Mute", MUTE.rc6),
+            button("Back", "Back", BACK.rc6)
+        ), top = 12)
+        addSection(remote, row(
+            rocker("VOL", VOLUME_UP.rc6, VOLUME_DOWN.rc6, "Volume"),
+            rocker("CH", CHANNEL_UP.rc6, CHANNEL_DOWN.rc6, "Channel")
+        ), top = 12)
+
+        // Philips RC6 TV digit commands are 0x00 through 0x09.
+        for (first in listOf(1, 4, 7)) {
+            val digits = (first..first + 2).map { number ->
+                button(number.toString(), number.toString(), number, size = 19f)
+            }
+            addSection(remote, row(*digits.toTypedArray()), top = if (first == 1) 12 else 4)
+        }
+        addSection(remote, row(View(this), button("0", "0", 0x00, size = 19f), View(this)), top = 4)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -87,68 +114,91 @@ class MainActivity : Activity() {
         super.onSaveInstanceState(outState)
     }
 
-    private fun row(enabled: Boolean, vararg keys: PhilipsKey?): LinearLayout {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for ((index, key) in keys.withIndex()) {
-            val view = if (key == null) View(this) else remoteButton(key, enabled)
-            val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                if (index > 0) marginStart = dp(8)
-                bottomMargin = dp(8)
+    private fun directionPad() = FrameLayout(this).apply {
+        minimumHeight = dp(180)
+        background = shape(DIAL, 90, CASE_EDGE)
+
+        fun addDirection(text: String, description: String, key: PhilipsKey, gravity: Int) {
+            val params = FrameLayout.LayoutParams(dp(54), dp(50), gravity).apply {
+                setMargins(dp(3), dp(3), dp(3), dp(3))
             }
-            row.addView(view, params)
+            addView(button(text, description, key.rc6, Color.TRANSPARENT, 17f), params)
         }
-        return row
+
+        addDirection("▲", "Up", UP, Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+        addDirection("◀", "Left", LEFT, Gravity.LEFT or Gravity.CENTER_VERTICAL)
+        addView(button("OK", "OK", OK.rc6, CENTER_KEY, 18f),
+            FrameLayout.LayoutParams(dp(60), dp(60), Gravity.CENTER))
+        addDirection("▶", "Right", RIGHT, Gravity.RIGHT or Gravity.CENTER_VERTICAL)
+        addDirection("▼", "Down", DOWN, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
     }
 
-    private fun remoteButton(key: PhilipsKey, enabled: Boolean): Button {
-        val power = key == PhilipsKey.POWER
-        val fill = when (key) {
-            PhilipsKey.POWER -> ACCENT
-            PhilipsKey.OK -> NAVIGATION
-            else -> BUTTON
-        }
-        val foreground = if (power) BACKGROUND else TEXT
-        val shape = GradientDrawable().apply {
-            setColor(fill)
-            cornerRadius = dp(14).toFloat()
-        }
-        return Button(this).apply {
-            text = key.label
-            isAllCaps = false
-            textSize = when (key) {
-                PhilipsKey.UP, PhilipsKey.DOWN, PhilipsKey.LEFT, PhilipsKey.RIGHT -> 24f
-                else -> 17f
-            }
-            contentDescription = when (key) {
-                PhilipsKey.UP -> "Up"
-                PhilipsKey.DOWN -> "Down"
-                PhilipsKey.LEFT -> "Left"
-                PhilipsKey.RIGHT -> "Right"
-                PhilipsKey.VOLUME_UP -> "Volume up"
-                PhilipsKey.VOLUME_DOWN -> "Volume down"
-                PhilipsKey.CHANNEL_UP -> "Channel up"
-                PhilipsKey.CHANNEL_DOWN -> "Channel down"
-                else -> key.label
-            }
-            setTextColor(foreground)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            gravity = Gravity.CENTER
-            minimumHeight = dp(58)
-            minimumWidth = 0
-            setPadding(dp(6), dp(8), dp(6), dp(8))
-            stateListAnimator = null
-            background = RippleDrawable(ColorStateList.valueOf(RIPPLE), shape, null)
-            isEnabled = enabled
-            alpha = if (enabled) 1f else 0.55f
-            setOnClickListener { transmit(key) }
+    private fun rocker(title: String, up: Int, down: Int, description: String) = column().apply {
+        background = shape(DIAL, 23, CASE_EDGE)
+        addView(button("+", "$description up", up, Color.TRANSPARENT, 23f))
+        addView(label(title, 11f, SECONDARY).apply {
+            letterSpacing = 0.16f
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(-1, -2))
+        addView(button("−", "$description down", down, Color.TRANSPARENT, 23f))
+    }
+
+    private fun column() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+    }
+
+    private fun row(vararg views: View) = LinearLayout(this).apply {
+        for ((index, view) in views.withIndex()) {
+            addView(view, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                if (index > 0) marginStart = dp(7)
+            })
         }
     }
 
-    private fun transmit(key: PhilipsKey) {
+    private fun addSection(remote: LinearLayout, view: View, top: Int = 0, width: Int = -1) {
+        remote.addView(view, LinearLayout.LayoutParams(width, -2).apply { topMargin = dp(top) })
+    }
+
+    private fun label(value: String, size: Float, colour: Int) = TextView(this).apply {
+        text = value
+        textSize = size
+        setTextColor(colour)
+        gravity = Gravity.CENTER
+        includeFontPadding = false
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    }
+
+    private fun button(
+        value: String, description: String, command: Int, fill: Int = KEY, size: Float = 15f
+    ) = Button(this).apply {
+        text = value
+        contentDescription = description
+        isAllCaps = false
+        textSize = size
+        setTextColor(TEXT)
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        gravity = Gravity.CENTER
+        minimumWidth = 0
+        minimumHeight = dp(48)
+        setPadding(dp(4), 0, dp(4), 0)
+        stateListAnimator = null
+        background = RippleDrawable(ColorStateList.valueOf(RIPPLE), shape(fill, 28), shape(Color.WHITE, 28))
+        setOnClickListener { transmit(command) }
+        isEnabled = hasEmitter
+        alpha = if (hasEmitter) 1f else 0.6f
+    }
+
+    private fun shape(fill: Int, radius: Int, outline: Int = Color.TRANSPARENT) = GradientDrawable().apply {
+        setColor(fill)
+        cornerRadius = dp(radius).toFloat()
+        if (outline != Color.TRANSPARENT) setStroke(dp(1), outline)
+    }
+
+    private fun transmit(command: Int) {
         val emitter = ir ?: return
         val nextToggle = !toggle
         try {
-            emitter.transmit(PhilipsIr.CARRIER_HZ, PhilipsIr.encode(PhilipsProtocol.RC6, key.rc6, nextToggle))
+            emitter.transmit(PhilipsIr.CARRIER_HZ, PhilipsIr.encode(PhilipsProtocol.RC6, command, nextToggle))
             toggle = nextToggle
             status.visibility = View.GONE
         } catch (_: RuntimeException) {
@@ -158,19 +208,22 @@ class MainActivity : Activity() {
 
     private fun showStatus(message: String) {
         status.text = message
-        status.setPadding(0, 0, 0, dp(12))
+        status.setPadding(0, dp(8), 0, 0)
         status.visibility = View.VISIBLE
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
 
     private companion object {
-        val BACKGROUND = 0xFF111814.toInt()
-        val BUTTON = 0xFF26342C.toInt()
-        val NAVIGATION = 0xFF3B5745.toInt()
-        val ACCENT = 0xFF9CE3AF.toInt()
-        val TEXT = 0xFFF4F8F5.toInt()
-        val MUTED = 0xFFACBEB1.toInt()
-        val RIPPLE = 0x33FFFFFF
+        val BACKGROUND = 0xFF111415.toInt()
+        val CASE = 0xFF202426.toInt()
+        val CASE_EDGE = 0xFF404749.toInt()
+        val DIAL = 0xFF2E3436.toInt()
+        val KEY = 0xFF383F42.toInt()
+        val CENTER_KEY = 0xFF546062.toInt()
+        val POWER_RED = 0xFFB82B3A.toInt()
+        val TEXT = 0xFFF6F8F8.toInt()
+        val SECONDARY = 0xFFBAC5C5.toInt()
+        const val RIPPLE = 0x35FFFFFF
     }
 }
