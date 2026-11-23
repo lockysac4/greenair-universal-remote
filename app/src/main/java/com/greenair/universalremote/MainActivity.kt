@@ -285,20 +285,26 @@ class MainActivity:Activity() {
     val input=nameInput()
     val labels=arrayOf("Philips (RC6)","Universal (RC6)","Universal (RC5)")
     val types=arrayOf("PHILIPS","RC6","RC5")
-    var selected=0
-    val container=col().apply {setPadding(dp(14),dp(4),dp(14),0);addView(input)}
-    AlertDialog.Builder(this)
-      .setTitle("Add new remote")
-      .setView(container)
-      .setSingleChoiceItems(labels,0){_:DialogInterface,which:Int->selected=which}
+    val chooser=Spinner(this).apply{
+      adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,labels)
+      setSelection(0)
+    }
+    val container=col().apply {
+      setPadding(dp(16),dp(8),dp(16),0)
+      addView(label("NAME",12f,Color.LTGRAY))
+      addView(input)
+      addView(label("REMOTE TYPE",12f,Color.LTGRAY))
+      addView(chooser)
+    }
+    AlertDialog.Builder(this).setTitle("Add new remote").setView(container)
       .setNegativeButton("CANCEL",null)
       .setPositiveButton("ADD"){_,_->
         val name=input.text.toString().trim()
-        if(name.isEmpty()) {
+        if(name.isEmpty()){
           Toast.makeText(this,"Enter a remote name",Toast.LENGTH_SHORT).show()
         } else {
           val id="remote_"+System.currentTimeMillis().toString()+"_"+remotes.size
-          remotes.add(RemoteItem(id,name,types[selected]))
+          remotes.add(RemoteItem(id,name,types[chooser.selectedItemPosition]))
           selectedRemoteId=id
           saveRemotes();showSelectedRemote()
         }
