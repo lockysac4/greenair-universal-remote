@@ -1,6 +1,10 @@
 package com.greenair.universalremote
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.DialogInterface
+import org.json.JSONArray
+import org.json.JSONObject
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -28,6 +32,10 @@ class MainActivity:Activity() {
   private lateinit var status:TextView
   private val handler=Handler(Looper.getMainLooper())
   private var profile="RC6"
+  private data class RemoteItem(val id:String,val name:String,val type:String)
+  private val remotes=mutableListOf<RemoteItem>()
+  private var selectedRemoteId="philips"
+  private lateinit var header:TextView
   private var philipsActive=true
   private var toggle=0
   private var searching=false
@@ -39,12 +47,14 @@ class MainActivity:Activity() {
     window.navigationBarColor=Color.rgb(12,13,16)
     ir=getSystemService(CONSUMER_IR_SERVICE) as ConsumerIrManager
     profile=getSharedPreferences("remote",MODE_PRIVATE).getString("profile","RC6")?:"RC6"
+    loadRemotes()
     val outer=col().apply {setPadding(dp(12),dp(6),dp(12),0);setBackgroundColor(0xFF090C0D.toInt())}
     outer.addView(label("GREENAIR UNIVERSAL REMOTE",18f,Color.WHITE).apply { setPadding(0,dp(14),0,dp(5)) })
-    outer.addView(label("Philips 22PFT5403/98",15f,Color.LTGRAY).apply { setPadding(0,0,0,dp(15)) })
+    header=label(selectedRemote().name,15f,Color.LTGRAY).apply { setPadding(0,0,0,dp(15)) }
+    outer.addView(header)
     val tabs=LinearLayout(this)
-    listOf("REMOTE","PHILIPS","CODES").forEach { title ->
-      val active = title=="PHILIPS"
+    listOf("REMOTE","REMOTES","CODES").forEach { title ->
+      val active=title=="REMOTE"
       val tab=TextView(this).apply {
         text=title;textSize=14f;setTextColor(Color.WHITE);gravity=Gravity.CENTER
         background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
@@ -53,11 +63,16 @@ class MainActivity:Activity() {
           cornerRadius=dp(26).toFloat()
           setStroke(dp(if(active)2 else 1),if(active)0xFF5BE875.toInt() else 0xFF616A70.toInt())
         }
-        setOnClickListener {stop();if(title=="CODES")savedCodes() else remote(title=="PHILIPS")}
+        setOnClickListener {
+          stop()
+          when(title) {
+            "CODES" -> savedCodes()
+            "REMOTES" -> manageRemotes()
+            else -> showSelectedRemote()
+          }
+        }
       }
-      tabs.addView(tab,LinearLayout.LayoutParams(0,dp(52),1f).apply {
-        setMargins(dp(3),dp(2),dp(3),dp(2))
-      })
+      tabs.addView(tab,LinearLayout.LayoutParams(0,dp(52),1f).apply {setMargins(dp(3),dp(2),dp(3),dp(2))})
     }
     outer.addView(tabs)
     status=label(if(ir.hasIrEmitter()) "●  IR transmitter detected ✓" else "IR transmitter not detected",14f,0xFF65DD75.toInt())
@@ -66,7 +81,7 @@ class MainActivity:Activity() {
     val sc=ScrollView(this).apply {isVerticalScrollBarEnabled=false;addView(page)}
     outer.addView(sc,LinearLayout.LayoutParams(-1,0,1f))
     setContentView(outer)
-    remote(true)
+    showSelectedRemote()
   }
   private fun remote(philips:Boolean) {
     philipsActive=philips
@@ -80,7 +95,7 @@ class MainActivity:Activity() {
       page.addView(btn("START / STOP AUTO SEARCH",0xFF45474D.toInt(),14f){if(searching)stop()else start()},LinearLayout.LayoutParams(-1,dp(55)))
       page.addView(btn("TV RESPONDED - STOP & SAVE",0xFF45474D.toInt(),14f){saveCode()},LinearLayout.LayoutParams(-1,dp(55)))
     }
-    page.addView(label("v0.9.0  •  Saved remote codes",12f,Color.LTGRAY))
+    page.addView(label("v1.0.0  •  Saved remote codes",12f,Color.LTGRAY))
   }
 
   private inner class RemoteFace(private val philips:Boolean):View(this@MainActivity) {
@@ -166,8 +181,8 @@ class MainActivity:Activity() {
         val x=event.x*400f/width;val y=event.y*592f/height
         val cmd=hit.lastOrNull{it.first.contains(x,y)}?.second
         when(cmd){
-          "PROFILE_RC5"->{profile="RC5";invalidate()}
-          "PROFILE_RC6"->{profile="RC6";invalidate()}
+          "PROFILE_RC5"->{profile="RC5";saveCurrentProfile();invalidate()}
+          "PROFILE_RC6"->{profile="RC6";saveCurrentProfile();invalidate()}
           null -> {}
           else -> send(cmd)
         }
@@ -178,6 +193,149 @@ class MainActivity:Activity() {
     override fun performClick():Boolean {super.performClick();return true}
   }
 
+
+  private fun loadRemotes() {
+    remotes.clear()
+    val prefs=getSharedPreferences("remote_collection",MODE_PRIVATE)
+    val stored=prefs.getString("items",null)
+    if(stored!=null) {
+      try {
+        val items=JSONArray(stored)
+        for(i in 0 until items.length()) {
+          val obj=items.getJSONObject(i)
+          val id=obj.optString("id")
+          val name=obj.optString("name").trim()
+          val type=obj.optString("type")
+          if(id.isNotBlank() && name.isNotBlank() && type in listOf("PHILIPS","RC6","RC5") && remotes.none{it.id==id}) {
+            remotes.add(RemoteItem(id,name,type))
+          }
+        }
+      } catch(e:Exception) {}
+    }
+    if(remotes.isEmpty()) {
+      remotes.add(RemoteItem("philips","Philips 22PFT5403/98","PHILIPS"))
+      remotes.add(RemoteItem("universal","Universal Remote","RC6"))
+    }
+    selectedRemoteId=prefs.getString("selected","philips")?:"philips"
+    if(remotes.none{it.id==selectedRemoteId})selectedRemoteId=remotes.first().id
+    saveRemotes()
+  }
+  private fun saveRemotes() {
+    val json=JSONArray()
+    remotes.forEach {r->
+      json.put(JSONObject().put("id",r.id).put("name",r.name).put("type",r.type))
+    }
+    getSharedPreferences("remote_collection",MODE_PRIVATE).edit()
+      .putString("items",json.toString()).putString("selected",selectedRemoteId).apply()
+  }
+  private fun selectedRemote():RemoteItem =
+    remotes.firstOrNull{it.id==selectedRemoteId}?:remotes.first()
+
+  private fun saveCurrentProfile() {
+    val r=selectedRemote()
+    if(r.type!="PHILIPS" && r.type!=profile){
+      val i=remotes.indexOfFirst{it.id==r.id}
+      if(i>=0) {
+        remotes[i]=r.copy(type=profile)
+        saveRemotes()
+      }
+    }
+  }
+  private fun showSelectedRemote() {
+    val r=selectedRemote()
+    header.text=r.name
+    profile=if(r.type=="RC5")"RC5" else "RC6"
+    remote(r.type=="PHILIPS")
+  }
+  private fun manageRemotes(){
+    page.removeAllViews()
+    page.addView(label("MY REMOTES",21f,Color.WHITE))
+    page.addView(label("Select a remote, rename it, or add another.",14f,Color.LTGRAY))
+    page.addView(btn("+  ADD REMOTE",0xFF255E38.toInt(),17f){addRemoteDialog()},
+      LinearLayout.LayoutParams(-1,dp(58)).apply{setMargins(dp(6),dp(8),dp(6),dp(14))})
+    remotes.toList().forEach { r->
+      val wrapper=col().apply {
+        setPadding(dp(8),dp(9),dp(8),dp(9))
+        background=rounded(if(r.id==selectedRemoteId)0xFF234330.toInt() else 0xFF252B2F.toInt(),20)
+      }
+      val typeLabel=when(r.type){"PHILIPS"->"Philips • RC6";"RC5"->"Universal • RC5";else->"Universal • RC6"}
+      wrapper.addView(label(r.name,17f,Color.WHITE))
+      wrapper.addView(label(typeLabel,12f,Color.LTGRAY))
+      val row=LinearLayout(this)
+      row.addView(btn(if(r.id==selectedRemoteId)"SELECTED ✓" else "USE",0xFF296B3D.toInt(),13f) {
+        selectedRemoteId=r.id;saveRemotes();showSelectedRemote()
+      },LinearLayout.LayoutParams(0,dp(48),1.2f))
+      row.addView(btn("RENAME",0xFF41484D.toInt(),13f){renameRemoteDialog(r)},
+        LinearLayout.LayoutParams(0,dp(48),1.2f).apply{setMargins(dp(6),0,0,0)})
+      row.addView(btn("DELETE",0xFF573439.toInt(),13f){deleteRemoteDialog(r)},
+        LinearLayout.LayoutParams(0,dp(48),1f).apply{setMargins(dp(6),0,0,0)})
+      wrapper.addView(row)
+      page.addView(wrapper,LinearLayout.LayoutParams(-1,-2).apply{setMargins(dp(5),dp(4),dp(5),dp(8))})
+    }
+    page.addView(label("v1.0.0  •  Remotes saved on this phone",12f,Color.LTGRAY))
+  }
+  private fun nameInput(default:String=""):EditText =
+    EditText(this).apply {
+      setSingleLine(true);setText(default);selectAll()
+      setTextColor(Color.WHITE);setHintTextColor(Color.LTGRAY)
+      hint="Remote name";setPadding(dp(17),dp(10),dp(17),dp(10))
+    }
+
+  private fun addRemoteDialog(){
+    val input=nameInput()
+    val labels=arrayOf("Philips (RC6)","Universal (RC6)","Universal (RC5)")
+    val types=arrayOf("PHILIPS","RC6","RC5")
+    var selected=0
+    val container=col().apply {setPadding(dp(14),dp(4),dp(14),0);addView(input)}
+    AlertDialog.Builder(this)
+      .setTitle("Add new remote")
+      .setView(container)
+      .setSingleChoiceItems(labels,0){_:DialogInterface,which:Int->selected=which}
+      .setNegativeButton("CANCEL",null)
+      .setPositiveButton("ADD"){_,_->
+        val name=input.text.toString().trim()
+        if(name.isEmpty()) {
+          Toast.makeText(this,"Enter a remote name",Toast.LENGTH_SHORT).show()
+        } else {
+          val id="remote_"+System.currentTimeMillis().toString()+"_"+remotes.size
+          remotes.add(RemoteItem(id,name,types[selected]))
+          selectedRemoteId=id
+          saveRemotes();showSelectedRemote()
+        }
+      }.show()
+  }
+  private fun renameRemoteDialog(r:RemoteItem){
+    val input=nameInput(r.name)
+    val container=col().apply{setPadding(dp(14),dp(8),dp(14),0);addView(input)}
+    AlertDialog.Builder(this).setTitle("Rename remote").setView(container)
+      .setNegativeButton("CANCEL",null)
+      .setPositiveButton("SAVE"){_,_->
+        val name=input.text.toString().trim()
+        if(name.isEmpty()){
+          Toast.makeText(this,"Enter a remote name",Toast.LENGTH_SHORT).show()
+        } else {
+          val i=remotes.indexOfFirst{it.id==r.id}
+          if(i>=0)remotes[i]=r.copy(name=name)
+          saveRemotes()
+          if(r.id==selectedRemoteId)header.text=name
+          manageRemotes()
+        }
+      }.show()
+  }
+  private fun deleteRemoteDialog(r:RemoteItem){
+    if(remotes.size<=1){
+      Toast.makeText(this,"Keep at least one remote",Toast.LENGTH_SHORT).show()
+      return
+    }
+    AlertDialog.Builder(this).setTitle("Delete remote?")
+      .setMessage("Remove "+r.name+" from this phone?")
+      .setNegativeButton("CANCEL",null)
+      .setPositiveButton("DELETE"){_,_->
+        remotes.removeAll{it.id==r.id}
+        if(selectedRemoteId==r.id)selectedRemoteId=remotes.first().id
+        saveRemotes();header.text=selectedRemote().name;manageRemotes()
+      }.show()
+  }
   private fun savedCodes(){
     page.removeAllViews()
     page.addView(label("SAVED CODES",20f,Color.WHITE))
