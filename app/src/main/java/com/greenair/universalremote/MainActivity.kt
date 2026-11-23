@@ -6,6 +6,10 @@ import android.os.Handler
 import android.os.Looper
 import android.hardware.ConsumerIrManager
 import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Shader
+import android.graphics.Typeface
+import android.graphics.Path
 import android.graphics.drawable.GradientDrawable
 import android.content.res.ColorStateList
 import android.view.Gravity
@@ -35,15 +39,25 @@ class MainActivity:Activity() {
     window.navigationBarColor=Color.rgb(12,13,16)
     ir=getSystemService(CONSUMER_IR_SERVICE) as ConsumerIrManager
     profile=getSharedPreferences("remote",MODE_PRIVATE).getString("profile","RC6")?:"RC6"
-    val outer=col().apply {setPadding(dp(12),dp(6),dp(12),0);setBackgroundColor(0xFF0C0D10.toInt())}
-    outer.addView(label("GREENAIR UNIVERSAL REMOTE",16f,Color.WHITE).apply { setPadding(0,dp(7),0,dp(2)) })
-    outer.addView(label("Philips 22PFT5403/98",14f,Color.LTGRAY).apply { setPadding(0,0,0,dp(8)) })
+    val outer=col().apply {setPadding(dp(12),dp(6),dp(12),0);setBackgroundColor(0xFF090C0D.toInt())}
+    outer.addView(label("GREENAIR UNIVERSAL REMOTE",18f,Color.WHITE).apply { setPadding(0,dp(14),0,dp(5)) })
+    outer.addView(label("Philips 22PFT5403/98",15f,Color.LTGRAY).apply { setPadding(0,0,0,dp(15)) })
     val tabs=LinearLayout(this)
-    listOf("REMOTE","PHILIPS","CODES").forEach{ title->
-      tabs.addView(btn(title,0xFF303238.toInt(),12f) {
-        stop()
-        if(title=="CODES") savedCodes() else remote(title=="PHILIPS")
-      },LinearLayout.LayoutParams(0,dp(49),1f))
+    listOf("REMOTE","PHILIPS","CODES").forEach { title ->
+      val active = title=="PHILIPS"
+      val tab=TextView(this).apply {
+        text=title;textSize=14f;setTextColor(Color.WHITE);gravity=Gravity.CENTER
+        background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+          intArrayOf(if(active)0xFF17482A.toInt() else 0xFF343A3D.toInt(),
+                     if(active)0xFF071F10.toInt() else 0xFF24292D.toInt())).apply {
+          cornerRadius=dp(26).toFloat()
+          setStroke(dp(if(active)2 else 1),if(active)0xFF5BE875.toInt() else 0xFF616A70.toInt())
+        }
+        setOnClickListener {stop();if(title=="CODES")savedCodes() else remote(title=="PHILIPS")}
+      }
+      tabs.addView(tab,LinearLayout.LayoutParams(0,dp(52),1f).apply {
+        setMargins(dp(3),dp(2),dp(3),dp(2))
+      })
     }
     outer.addView(tabs)
     status=label(if(ir.hasIrEmitter()) "●  IR transmitter detected ✓" else "IR transmitter not detected",14f,0xFF65DD75.toInt())
@@ -57,128 +71,113 @@ class MainActivity:Activity() {
   private fun remote(philips:Boolean) {
     philipsActive=philips
     page.removeAllViews()
-    val body=col().apply {
-      setPadding(dp(14),dp(8),dp(14),dp(16))
-      background=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(0xFF24282A.toInt(),0xFF111619.toInt())).apply {
-        cornerRadius=dp(35).toFloat();setStroke(dp(1),0xFF407650.toInt())
-      }
-      elevation=dp(5).toFloat()
-    }
-    page.addView(body,LinearLayout.LayoutParams(-1,-2).apply{setMargins(dp(5),dp(10),dp(5),dp(8))})
-    if (philips) {
-      profile="RC6"
-      body.addView(label("━━  Philips Profile Active  ━━",14f,Color.WHITE).apply {
-        setPadding(0,dp(9),0,dp(13))
-      })
-    } else {
-      body.addView(label("UNIVERSAL PROFILE",12f,Color.LTGRAY))
-      val profiles=RadioGroup(this).apply{orientation=RadioGroup.HORIZONTAL;gravity=Gravity.CENTER}
-      listOf("RC6","RC5").forEach{p->
-        profiles.addView(RadioButton(this).apply{
-          text=p;textSize=14f;setTextColor(Color.WHITE)
-          buttonTintList=ColorStateList.valueOf(0xFF61E46F.toInt())
-          isChecked=profile==p
-          setOnClickListener {
-            profile=p
-            getSharedPreferences("remote",MODE_PRIVATE).edit().putString("profile",p).apply()
-          }
-        },LinearLayout.LayoutParams(0,dp(43),1f))
-      }
-      body.addView(profiles)
-    }
-    val top=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
-    top.addView(btn("⏻",0xFFBE1F26.toInt(),31f){send("POWER")},LinearLayout.LayoutParams(dp(92),dp(63)))
-    top.addView(View(this),LinearLayout.LayoutParams(0,dp(1),1f))
-    top.addView(btn("↪  SOURCE",0xFF353A3E.toInt(),14f){send("SOURCE")},LinearLayout.LayoutParams(dp(132),dp(58)))
-    body.addView(top)
-
-    val ctr=LinearLayout(this).apply{gravity=Gravity.CENTER}
-    fun rocker(caption:String,plus:String,minus:String):LinearLayout {
-      return col().apply {
-        background=rounded(0xFF31363A.toInt(),27)
-        setPadding(dp(2),dp(2),dp(2),dp(2))
-        addView(rockerPart("+"){send(plus)},LinearLayout.LayoutParams(-1,dp(53)))
-        addView(label(caption,15f,Color.WHITE).apply{setPadding(0,dp(6),0,dp(6))})
-        addView(rockerPart("−"){send(minus)},LinearLayout.LayoutParams(-1,dp(53)))
-      }
-    }
-    val vol=rocker("VOL","VOL+","VOL-")
-    val mid=col().apply{gravity=Gravity.CENTER}
-    mid.addView(btn("◀̸  MUTE",0xFF32373B.toInt(),13f){send("MUTE")},LinearLayout.LayoutParams(-1,dp(69)))
-    mid.addView(View(this),LinearLayout.LayoutParams(-1,dp(10)))
-    mid.addView(btn("⌂  HOME",0xFF32373B.toInt(),13f){send("HOME")},LinearLayout.LayoutParams(-1,dp(69)))
-    val ch=rocker("CH","CH+","CH-")
-    ctr.addView(vol,LinearLayout.LayoutParams(0,dp(165),1f).apply{setMargins(dp(2),dp(17),dp(5),0)})
-    ctr.addView(mid,LinearLayout.LayoutParams(0,dp(165),1.23f).apply{setMargins(dp(3),dp(17),dp(3),0)})
-    ctr.addView(ch,LinearLayout.LayoutParams(0,dp(165),1f).apply{setMargins(dp(5),dp(17),dp(2),0)})
-    body.addView(ctr)
-
-    val menu=LinearLayout(this)
-    menu.addView(btn("☰  MENU",0xFF33383C.toInt(),14f){send("MENU")},LinearLayout.LayoutParams(0,dp(61),1f).apply{setMargins(0,dp(15),dp(6),0)})
-    menu.addView(btn("↶  BACK",0xFF33383C.toInt(),14f){send("BACK")},LinearLayout.LayoutParams(0,dp(61),1f).apply{setMargins(dp(6),dp(15),0,0)})
-    body.addView(menu)
-
-    val dpad=DirectionPad()
-    body.addView(dpad,LinearLayout.LayoutParams(-1,dp(274)).apply{setMargins(0,dp(12),0,dp(3))})
+    if(philips) profile="RC6"
+    page.addView(RemoteFace(philips),LinearLayout.LayoutParams(-1,-2).apply {
+      setMargins(dp(2),dp(8),dp(2),dp(6))
+    })
     if(!philips) {
       page.addView(label("TCL / Universal TV code search",16f,Color.WHITE))
       page.addView(btn("START / STOP AUTO SEARCH",0xFF45474D.toInt(),14f){if(searching)stop()else start()},LinearLayout.LayoutParams(-1,dp(55)))
       page.addView(btn("TV RESPONDED - STOP & SAVE",0xFF45474D.toInt(),14f){saveCode()},LinearLayout.LayoutParams(-1,dp(55)))
     }
-    page.addView(label("v0.8.0  •  Saved remote codes",12f,Color.LTGRAY))
+    page.addView(label("v0.9.0  •  Saved remote codes",12f,Color.LTGRAY))
   }
 
-  private fun rockerPart(s:String,action:()->Unit)=TextView(this).apply{
-    text=s;textSize=29f;setTextColor(Color.WHITE);gravity=Gravity.CENTER
-    setOnClickListener{action()}
-  }
-
-  private inner class DirectionPad:View(this@MainActivity) {
-    private val p=Paint(Paint.ANTI_ALIAS_FLAG)
-    override fun onDraw(c:Canvas) {
-      super.onDraw(c)
-      val cx=width/2f
-      val cy=height/2f
-      val radius=minOf(width.toFloat(),height.toFloat())*0.46f
-      val outer=RectF(cx-radius,cy-radius,cx+radius,cy+radius)
-      p.style=Paint.Style.STROKE;p.strokeWidth=radius*0.46f;p.strokeCap=Paint.Cap.BUTT
-      p.color=0xFF0C1113.toInt()
-      c.drawCircle(cx,cy,radius*0.78f,p)
-      p.color=0xFF393E43.toInt()
-      for(i in 0..3) c.drawArc(outer, i*90f+229f,82f,false,p)
-      p.style=Paint.Style.STROKE;p.strokeWidth=dp(1).toFloat();p.color=0xFF72797D.toInt()
-      c.drawCircle(cx,cy,radius*1.015f,p)
-      p.style=Paint.Style.FILL
-      p.color=0xFF13181B.toInt();c.drawCircle(cx,cy,radius*0.47f,p)
-      p.color=0xFF47CD68.toInt();c.drawCircle(cx,cy,radius*0.425f,p)
-      p.color=0xFF272D30.toInt();c.drawCircle(cx,cy,radius*0.398f,p)
-      p.color=Color.WHITE;p.textAlign=Paint.Align.CENTER
-      p.textSize=radius*0.34f;p.typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.BOLD)
-      c.drawText("OK",cx,cy-(p.ascent()+p.descent())/2f,p)
-      p.textSize=radius*0.30f
-      c.drawText("▲",cx,cy-radius*0.66f-(p.ascent()+p.descent())/2f,p)
-      c.drawText("▼",cx,cy+radius*0.66f-(p.ascent()+p.descent())/2f,p)
-      c.drawText("◀",cx-radius*0.68f,cy-(p.ascent()+p.descent())/2f,p)
-      c.drawText("▶",cx+radius*0.68f,cy-(p.ascent()+p.descent())/2f,p)
+  private inner class RemoteFace(private val philips:Boolean):View(this@MainActivity) {
+    private val paint=Paint(Paint.ANTI_ALIAS_FLAG)
+    private val hit=mutableListOf<Pair<RectF,String>>()
+    override fun onMeasure(w:Int,h:Int){
+      val width=MeasureSpec.getSize(w)
+      setMeasuredDimension(width,(width*1.48f).toInt())
     }
-    override fun onTouchEvent(event:MotionEvent):Boolean {
+    private fun rect(c:Canvas,l:Float,t:Float,r:Float,b:Float,rad:Float,top:Int,bottom:Int,stroke:Int=0xFF5D676C.toInt()){
+      val area=RectF(l,t,r,b)
+      paint.style=Paint.Style.FILL
+      paint.shader=LinearGradient(l,t,l,b,top,bottom,Shader.TileMode.CLAMP)
+      c.drawRoundRect(area,rad,rad,paint)
+      paint.shader=null
+      paint.style=Paint.Style.STROKE;paint.strokeWidth=0.85f;paint.color=stroke
+      c.drawRoundRect(area,rad,rad,paint);paint.style=Paint.Style.FILL
+    }
+    private fun text(c:Canvas,t:String,x:Float,y:Float,size:Float,color:Int=Color.WHITE,bold:Boolean=false){
+      paint.style=Paint.Style.FILL;paint.color=color;paint.textAlign=Paint.Align.CENTER
+      paint.typeface=Typeface.create("sans-serif",if(bold)Typeface.BOLD else Typeface.NORMAL)
+      paint.textSize=size
+      c.drawText(t,x,y-(paint.ascent()+paint.descent())/2f,paint)
+    }
+    private fun button(c:Canvas,l:Float,t:Float,r:Float,b:Float,label:String,action:String,
+                       color:Int=0xFF3A4045.toInt(),size:Float=17f,rad:Float=19f){
+      rect(c,l,t,r,b,rad,color,0xFF20262A.toInt())
+      text(c,label,(l+r)/2,(t+b)/2,size)
+      hit.add(RectF(l,t,r,b) to action)
+    }
+    override fun onDraw(canvas:Canvas){
+      super.onDraw(canvas);hit.clear()
+      canvas.save();canvas.scale(width/400f,height/592f)
+      rect(canvas,3f,3f,397f,589f,36f,0xFF22292B.toInt(),0xFF0F1718.toInt(),0xFF3A8E55.toInt())
+      text(canvas,if(philips)"Philips Profile Active" else "Universal IR Profile",200f,33f,17f)
+      paint.strokeWidth=1.3f;paint.color=0xFF42BE62.toInt()
+      canvas.drawLine(42f,34f,100f,34f,paint);canvas.drawLine(300f,34f,358f,34f,paint)
+      if(!philips){
+        button(canvas,90f,43f,190f,72f,"RC6","PROFILE_RC6",0xFF23432C.toInt(),14f)
+        button(canvas,210f,43f,310f,72f,"RC5","PROFILE_RC5",0xFF383D40.toInt(),14f)
+      }
+      button(canvas,34f,75f,140f,138f,"⏻","POWER",0xFFCB222A.toInt(),34f,21f)
+      button(canvas,247f,76f,367f,136f,"→  SOURCE","SOURCE",0xFF424950.toInt(),16f)
+      rect(canvas,35f,156f,119f,312f,26f,0xFF3A4146.toInt(),0xFF252C30.toInt())
+      hit.add(RectF(35f,156f,119f,224f) to "VOL+")
+      hit.add(RectF(35f,245f,119f,312f) to "VOL-")
+      text(canvas,"+",77f,185f,34f);text(canvas,"VOL",77f,232f,15f);text(canvas,"−",77f,282f,34f)
+      rect(canvas,281f,156f,365f,312f,26f,0xFF3A4146.toInt(),0xFF252C30.toInt())
+      hit.add(RectF(281f,156f,365f,224f) to "CH+")
+      hit.add(RectF(281f,245f,365f,312f) to "CH-")
+      text(canvas,"+",323f,185f,34f);text(canvas,"CH",323f,232f,15f);text(canvas,"−",323f,282f,34f)
+      button(canvas,135f,165f,265f,223f,"◁  MUTE","MUTE",0xFF394146.toInt(),17f)
+      button(canvas,135f,245f,265f,303f,"⌂  HOME","HOME",0xFF394146.toInt(),17f)
+      button(canvas,31f,333f,190f,385f,"☰  MENU","MENU",0xFF3D4449.toInt(),18f)
+      button(canvas,210f,333f,369f,385f,"↶  BACK","BACK",0xFF3D4449.toInt(),18f)
+      val cx=200f;val cy=483f;val ro=88f;val ri=45f
+      for(i in 0..3){
+        val start=225f+90f*i
+        val path=Path()
+        path.arcTo(RectF(cx-ro,cy-ro,cx+ro,cy+ro),start,88f)
+        path.arcTo(RectF(cx-ri,cy-ri,cx+ri,cy+ri),start+88f,-88f)
+        path.close()
+        paint.shader=LinearGradient(0f,cy-ro,0f,cy+ro,0xFF454D53.toInt(),0xFF252D32.toInt(),Shader.TileMode.CLAMP)
+        paint.style=Paint.Style.FILL;canvas.drawPath(path,paint);paint.shader=null
+        paint.color=0xFF151B1D.toInt();paint.strokeWidth=2f;paint.style=Paint.Style.STROKE;canvas.drawPath(path,paint)
+        paint.style=Paint.Style.FILL
+      }
+      paint.color=0xFF5AE578.toInt();canvas.drawCircle(cx,cy,44f,paint)
+      paint.color=0xFF242C31.toInt();canvas.drawCircle(cx,cy,41f,paint)
+      text(canvas,"OK",cx,cy,25f,Color.WHITE,true)
+      text(canvas,"▲",cx,417f,23f);text(canvas,"▼",cx,549f,23f)
+      text(canvas,"◀",134f,cy,23f);text(canvas,"▶",266f,cy,23f)
+      hit.add(RectF(160f,443f,240f,523f) to "OK")
+      hit.add(RectF(160f,393f,240f,440f) to "UP")
+      hit.add(RectF(160f,525f,240f,575f) to "DOWN")
+      hit.add(RectF(106f,443f,158f,523f) to "LEFT")
+      hit.add(RectF(242f,443f,294f,523f) to "RIGHT")
+      canvas.restore()
+    }
+    override fun onTouchEvent(event:MotionEvent):Boolean{
       if(event.action==MotionEvent.ACTION_DOWN) return true
-      if(event.action==MotionEvent.ACTION_UP) {
-        val dx=event.x-width/2f;val dy=event.y-height/2f
-        val r=hypot(dx.toDouble(),dy.toDouble()).toFloat()
-        val radius=minOf(width.toFloat(),height.toFloat())*0.46f
-        if(r<radius*0.45f)send("OK")
-        else if(r<=radius*1.04f) {
-          if(kotlin.math.abs(dx)>kotlin.math.abs(dy))send(if(dx>0)"RIGHT" else "LEFT")
-          else send(if(dy>0)"DOWN" else "UP")
+      if(event.action==MotionEvent.ACTION_UP){
+        val x=event.x*400f/width;val y=event.y*592f/height
+        val cmd=hit.lastOrNull{it.first.contains(x,y)}?.second
+        when(cmd){
+          "PROFILE_RC5"->{profile="RC5";invalidate()}
+          "PROFILE_RC6"->{profile="RC6";invalidate()}
+          null -> {}
+          else -> send(cmd)
         }
         performClick()
-        return true
       }
       return true
     }
     override fun performClick():Boolean {super.performClick();return true}
   }
+
   private fun savedCodes(){
     page.removeAllViews()
     page.addView(label("SAVED CODES",20f,Color.WHITE))
