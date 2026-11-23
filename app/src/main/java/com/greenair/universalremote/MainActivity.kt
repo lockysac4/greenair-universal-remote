@@ -11,6 +11,12 @@ import android.content.res.ColorStateList
 import android.view.Gravity
 import android.widget.*
 import android.view.View
+import android.view.MotionEvent
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import kotlin.math.atan2
+import kotlin.math.hypot
 
 class MainActivity:Activity() {
   private lateinit var ir:ConsumerIrManager
@@ -18,6 +24,7 @@ class MainActivity:Activity() {
   private lateinit var status:TextView
   private val handler=Handler(Looper.getMainLooper())
   private var profile="RC6"
+  private var philipsActive=true
   private var toggle=0
   private var searching=false
   private var idx=0
@@ -29,8 +36,8 @@ class MainActivity:Activity() {
     ir=getSystemService(CONSUMER_IR_SERVICE) as ConsumerIrManager
     profile=getSharedPreferences("remote",MODE_PRIVATE).getString("profile","RC6")?:"RC6"
     val outer=col().apply {setPadding(dp(12),dp(6),dp(12),0);setBackgroundColor(0xFF0C0D10.toInt())}
-    outer.addView(label("GREENAIR UNIVERSAL REMOTE",19f,Color.WHITE))
-    outer.addView(label("Philips 22PFT5403/98",14f,Color.LTGRAY))
+    outer.addView(label("GREENAIR UNIVERSAL REMOTE",16f,Color.WHITE).apply { setPadding(0,dp(7),0,dp(2)) })
+    outer.addView(label("Philips 22PFT5403/98",14f,Color.LTGRAY).apply { setPadding(0,0,0,dp(8)) })
     val tabs=LinearLayout(this)
     listOf("REMOTE","PHILIPS","CODES").forEach{ title->
       tabs.addView(btn(title,0xFF303238.toInt(),12f) {
@@ -48,60 +55,129 @@ class MainActivity:Activity() {
     remote(true)
   }
   private fun remote(philips:Boolean) {
+    philipsActive=philips
     page.removeAllViews()
-    val body=col().apply{setPadding(dp(13),dp(12),dp(13),dp(16));background=rounded(0xFF1C1D21.toInt(),35)}
-    page.addView(body,LinearLayout.LayoutParams(-1,-2).apply{setMargins(dp(5),dp(10),dp(5),dp(8))})
-    body.addView(label("IR PROFILE",12f,Color.LTGRAY))
-    val profiles=RadioGroup(this).apply{orientation=RadioGroup.HORIZONTAL;gravity=Gravity.CENTER}
-    listOf("RC6","RC5").forEach{p->
-      profiles.addView(RadioButton(this).apply{
-        text=p;textSize=15f;setTextColor(Color.WHITE);buttonTintList=ColorStateList.valueOf(0xFF61E46F.toInt())
-        isChecked=profile==p
-        setOnClickListener{profile=p;getSharedPreferences("remote",MODE_PRIVATE).edit().putString("profile",p).apply()}
-      },LinearLayout.LayoutParams(0,dp(44),1f))
+    val body=col().apply {
+      setPadding(dp(14),dp(8),dp(14),dp(16))
+      background=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(0xFF24282A.toInt(),0xFF111619.toInt())).apply {
+        cornerRadius=dp(35).toFloat();setStroke(dp(1),0xFF407650.toInt())
+      }
+      elevation=dp(5).toFloat()
     }
-    body.addView(profiles)
+    page.addView(body,LinearLayout.LayoutParams(-1,-2).apply{setMargins(dp(5),dp(10),dp(5),dp(8))})
+    if (philips) {
+      profile="RC6"
+      body.addView(label("━━  Philips Profile Active  ━━",14f,Color.WHITE).apply {
+        setPadding(0,dp(9),0,dp(13))
+      })
+    } else {
+      body.addView(label("UNIVERSAL PROFILE",12f,Color.LTGRAY))
+      val profiles=RadioGroup(this).apply{orientation=RadioGroup.HORIZONTAL;gravity=Gravity.CENTER}
+      listOf("RC6","RC5").forEach{p->
+        profiles.addView(RadioButton(this).apply{
+          text=p;textSize=14f;setTextColor(Color.WHITE)
+          buttonTintList=ColorStateList.valueOf(0xFF61E46F.toInt())
+          isChecked=profile==p
+          setOnClickListener {
+            profile=p
+            getSharedPreferences("remote",MODE_PRIVATE).edit().putString("profile",p).apply()
+          }
+        },LinearLayout.LayoutParams(0,dp(43),1f))
+      }
+      body.addView(profiles)
+    }
     val top=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
-    top.addView(btn("⏻",0xFFBB2029.toInt(),27f){send("POWER")},LinearLayout.LayoutParams(dp(94),dp(70)))
+    top.addView(btn("⏻",0xFFBE1F26.toInt(),31f){send("POWER")},LinearLayout.LayoutParams(dp(92),dp(63)))
     top.addView(View(this),LinearLayout.LayoutParams(0,dp(1),1f))
-    top.addView(btn("⇥ SOURCE",0xFF35373B.toInt(),14f){send("SOURCE")},LinearLayout.LayoutParams(dp(140),dp(64)))
+    top.addView(btn("↪  SOURCE",0xFF353A3E.toInt(),14f){send("SOURCE")},LinearLayout.LayoutParams(dp(132),dp(58)))
     body.addView(top)
-    val ctr=LinearLayout(this)
-    val vol=col()
-    vol.addView(btn("+",0xFF35373B.toInt(),25f){send("VOL+")},LinearLayout.LayoutParams(-1,dp(65)))
-    vol.addView(label("VOL",13f,Color.WHITE))
-    vol.addView(btn("−",0xFF35373B.toInt(),25f){send("VOL-")},LinearLayout.LayoutParams(-1,dp(65)))
-    val mid=col()
-    mid.addView(btn("MUTE",0xFF35373B.toInt(),13f){send("MUTE")},LinearLayout.LayoutParams(-1,dp(76)))
-    mid.addView(btn("⌂ HOME",0xFF35373B.toInt(),13f){send("HOME")},LinearLayout.LayoutParams(-1,dp(76)))
-    val ch=col()
-    ch.addView(btn("+",0xFF35373B.toInt(),25f){send("CH+")},LinearLayout.LayoutParams(-1,dp(65)))
-    ch.addView(label("CH",13f,Color.WHITE))
-    ch.addView(btn("−",0xFF35373B.toInt(),25f){send("CH-")},LinearLayout.LayoutParams(-1,dp(65)))
-    listOf(vol,mid,ch).forEach {ctr.addView(it,LinearLayout.LayoutParams(0,-2,1f).apply{setMargins(dp(3),dp(9),dp(3),0)})}
+
+    val ctr=LinearLayout(this).apply{gravity=Gravity.CENTER}
+    fun rocker(caption:String,plus:String,minus:String):LinearLayout {
+      return col().apply {
+        background=rounded(0xFF31363A.toInt(),27)
+        setPadding(dp(2),dp(2),dp(2),dp(2))
+        addView(rockerPart("+"){send(plus)},LinearLayout.LayoutParams(-1,dp(53)))
+        addView(label(caption,15f,Color.WHITE).apply{setPadding(0,dp(6),0,dp(6))})
+        addView(rockerPart("−"){send(minus)},LinearLayout.LayoutParams(-1,dp(53)))
+      }
+    }
+    val vol=rocker("VOL","VOL+","VOL-")
+    val mid=col().apply{gravity=Gravity.CENTER}
+    mid.addView(btn("◀̸  MUTE",0xFF32373B.toInt(),13f){send("MUTE")},LinearLayout.LayoutParams(-1,dp(69)))
+    mid.addView(View(this),LinearLayout.LayoutParams(-1,dp(10)))
+    mid.addView(btn("⌂  HOME",0xFF32373B.toInt(),13f){send("HOME")},LinearLayout.LayoutParams(-1,dp(69)))
+    val ch=rocker("CH","CH+","CH-")
+    ctr.addView(vol,LinearLayout.LayoutParams(0,dp(165),1f).apply{setMargins(dp(2),dp(17),dp(5),0)})
+    ctr.addView(mid,LinearLayout.LayoutParams(0,dp(165),1.23f).apply{setMargins(dp(3),dp(17),dp(3),0)})
+    ctr.addView(ch,LinearLayout.LayoutParams(0,dp(165),1f).apply{setMargins(dp(5),dp(17),dp(2),0)})
     body.addView(ctr)
+
     val menu=LinearLayout(this)
-    menu.addView(btn("☰ MENU",0xFF35373B.toInt(),13f){send("MENU")},LinearLayout.LayoutParams(0,dp(57),1f))
-    menu.addView(btn("↶ BACK",0xFF35373B.toInt(),13f){send("BACK")},LinearLayout.LayoutParams(0,dp(57),1f))
+    menu.addView(btn("☰  MENU",0xFF33383C.toInt(),14f){send("MENU")},LinearLayout.LayoutParams(0,dp(61),1f).apply{setMargins(0,dp(15),dp(6),0)})
+    menu.addView(btn("↶  BACK",0xFF33383C.toInt(),14f){send("BACK")},LinearLayout.LayoutParams(0,dp(61),1f).apply{setMargins(dp(6),dp(15),0,0)})
     body.addView(menu)
-    body.addView(label("DIRECTION PAD",11f,Color.LTGRAY))
-    val up=LinearLayout(this).apply{gravity=Gravity.CENTER}
-    up.addView(btn("▲",0xFF36383D.toInt(),22f){send("UP")},LinearLayout.LayoutParams(dp(140),dp(53)))
-    body.addView(up)
-    val nav=LinearLayout(this)
-    nav.addView(btn("◀",0xFF36383D.toInt(),22f){send("LEFT")},LinearLayout.LayoutParams(0,dp(83),1f))
-    nav.addView(btn("OK",0xFF45474D.toInt(),24f){send("OK")},LinearLayout.LayoutParams(0,dp(83),1.2f))
-    nav.addView(btn("▶",0xFF36383D.toInt(),22f){send("RIGHT")},LinearLayout.LayoutParams(0,dp(83),1f))
-    body.addView(nav)
-    val down=LinearLayout(this).apply{gravity=Gravity.CENTER}
-    down.addView(btn("▼",0xFF36383D.toInt(),22f){send("DOWN")},LinearLayout.LayoutParams(dp(140),dp(53)))
-    body.addView(down)
-    if(!philips){
+
+    val dpad=DirectionPad()
+    body.addView(dpad,LinearLayout.LayoutParams(-1,dp(274)).apply{setMargins(0,dp(12),0,dp(3))})
+    if(!philips) {
       page.addView(label("TCL / Universal TV code search",16f,Color.WHITE))
       page.addView(btn("START / STOP AUTO SEARCH",0xFF45474D.toInt(),14f){if(searching)stop()else start()},LinearLayout.LayoutParams(-1,dp(55)))
       page.addView(btn("TV RESPONDED - STOP & SAVE",0xFF45474D.toInt(),14f){saveCode()},LinearLayout.LayoutParams(-1,dp(55)))
     }
-    page.addView(label("v0.7.0  •  Saved remote codes",12f,Color.LTGRAY))
+    page.addView(label("v0.8.0  •  Saved remote codes",12f,Color.LTGRAY))
+  }
+
+  private fun rockerPart(s:String,action:()->Unit)=TextView(this).apply{
+    text=s;textSize=29f;setTextColor(Color.WHITE);gravity=Gravity.CENTER
+    setOnClickListener{action()}
+  }
+
+  private inner class DirectionPad:View(this@MainActivity) {
+    private val p=Paint(Paint.ANTI_ALIAS_FLAG)
+    override fun onDraw(c:Canvas) {
+      super.onDraw(c)
+      val cx=width/2f
+      val cy=height/2f
+      val radius=minOf(width.toFloat(),height.toFloat())*0.46f
+      val outer=RectF(cx-radius,cy-radius,cx+radius,cy+radius)
+      p.style=Paint.Style.STROKE;p.strokeWidth=radius*0.46f;p.strokeCap=Paint.Cap.BUTT
+      p.color=0xFF0C1113.toInt()
+      c.drawCircle(cx,cy,radius*0.78f,p)
+      p.color=0xFF393E43.toInt()
+      for(i in 0..3) c.drawArc(outer, i*90f+229f,82f,false,p)
+      p.style=Paint.Style.STROKE;p.strokeWidth=dp(1).toFloat();p.color=0xFF72797D.toInt()
+      c.drawCircle(cx,cy,radius*1.015f,p)
+      p.style=Paint.Style.FILL
+      p.color=0xFF13181B.toInt();c.drawCircle(cx,cy,radius*0.47f,p)
+      p.color=0xFF47CD68.toInt();c.drawCircle(cx,cy,radius*0.425f,p)
+      p.color=0xFF272D30.toInt();c.drawCircle(cx,cy,radius*0.398f,p)
+      p.color=Color.WHITE;p.textAlign=Paint.Align.CENTER
+      p.textSize=radius*0.34f;p.typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.BOLD)
+      c.drawText("OK",cx,cy-(p.ascent()+p.descent())/2f,p)
+      p.textSize=radius*0.30f
+      c.drawText("▲",cx,cy-radius*0.66f-(p.ascent()+p.descent())/2f,p)
+      c.drawText("▼",cx,cy+radius*0.66f-(p.ascent()+p.descent())/2f,p)
+      c.drawText("◀",cx-radius*0.68f,cy-(p.ascent()+p.descent())/2f,p)
+      c.drawText("▶",cx+radius*0.68f,cy-(p.ascent()+p.descent())/2f,p)
+    }
+    override fun onTouchEvent(event:MotionEvent):Boolean {
+      if(event.action==MotionEvent.ACTION_DOWN) return true
+      if(event.action==MotionEvent.ACTION_UP) {
+        val dx=event.x-width/2f;val dy=event.y-height/2f
+        val r=hypot(dx.toDouble(),dy.toDouble()).toFloat()
+        val radius=minOf(width.toFloat(),height.toFloat())*0.46f
+        if(r<radius*0.45f)send("OK")
+        else if(r<=radius*1.04f) {
+          if(kotlin.math.abs(dx)>kotlin.math.abs(dy))send(if(dx>0)"RIGHT" else "LEFT")
+          else send(if(dy>0)"DOWN" else "UP")
+        }
+        performClick()
+        return true
+      }
+      return true
+    }
+    override fun performClick():Boolean {super.performClick();return true}
   }
   private fun savedCodes(){
     page.removeAllViews()
@@ -127,7 +203,7 @@ class MainActivity:Activity() {
       "UP" to 88,"DOWN" to 89,"LEFT" to 90,"RIGHT" to 91,"OK" to 92,"MENU" to 82,
       "BACK" to 10,"HOME" to 54,"SOURCE" to 56)[name]?:return
     toggle=1-toggle
-    try{ir.transmit(36000,if(profile=="RC5")rc5(c)else rc6(c))}
+    try{ir.transmit(36000,if(!philipsActive && profile=="RC5")rc5(c)else rc6(c))}
     catch(e:Exception){Toast.makeText(this,"IR error",Toast.LENGTH_SHORT).show()}
   }
   private fun duration(halves:List<Int>,u:Int):IntArray{
