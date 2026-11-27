@@ -95,7 +95,7 @@ class MainActivity:Activity() {
       page.addView(btn("START / STOP AUTO SEARCH",0xFF45474D.toInt(),14f){if(searching)stop()else start()},LinearLayout.LayoutParams(-1,dp(55)))
       page.addView(btn("TV RESPONDED - STOP & SAVE",0xFF45474D.toInt(),14f){saveCode()},LinearLayout.LayoutParams(-1,dp(55)))
     }
-    page.addView(label("v1.0.0  •  Saved remote codes",12f,Color.LTGRAY))
+    page.addView(label("v1.1.0  •  Saved remote codes",12f,Color.LTGRAY))
   }
 
   private inner class RemoteFace(private val philips:Boolean):View(this@MainActivity) {
@@ -130,10 +130,10 @@ class MainActivity:Activity() {
       super.onDraw(canvas);hit.clear()
       canvas.save();canvas.scale(width/400f,height/592f)
       rect(canvas,3f,3f,397f,589f,36f,0xFF22292B.toInt(),0xFF0F1718.toInt(),0xFF3A8E55.toInt())
-      text(canvas,if(philips)"Philips Profile Active" else "Universal IR Profile",200f,33f,17f)
+      text(canvas,if(selectedRemote().type=="DGTEC")"DGTEC DG-FV42LCD" else if(philips)"Philips Profile Active" else "Universal IR Profile",200f,33f,17f)
       paint.strokeWidth=1.3f;paint.color=0xFF42BE62.toInt()
       canvas.drawLine(42f,34f,100f,34f,paint);canvas.drawLine(300f,34f,358f,34f,paint)
-      if(!philips){
+      if(!philips && selectedRemote().type!="DGTEC"){
         button(canvas,90f,43f,190f,72f,"RC6","PROFILE_RC6",0xFF23432C.toInt(),14f)
         button(canvas,210f,43f,310f,72f,"RC5","PROFILE_RC5",0xFF383D40.toInt(),14f)
       }
@@ -206,7 +206,7 @@ class MainActivity:Activity() {
           val id=obj.optString("id")
           val name=obj.optString("name").trim()
           val type=obj.optString("type")
-          if(id.isNotBlank() && name.isNotBlank() && type in listOf("PHILIPS","RC6","RC5") && remotes.none{it.id==id}) {
+          if(id.isNotBlank() && name.isNotBlank() && type in listOf("PHILIPS","RC6","RC5","DGTEC") && remotes.none{it.id==id}) {
             remotes.add(RemoteItem(id,name,type))
           }
         }
@@ -245,7 +245,7 @@ class MainActivity:Activity() {
     val r=selectedRemote()
     header.text=r.name
     profile=if(r.type=="RC5")"RC5" else "RC6"
-    remote(r.type=="PHILIPS")
+    if(r.type=="DGTEC") showDgtec() else remote(r.type=="PHILIPS")
   }
   private fun manageRemotes(){
     page.removeAllViews()
@@ -258,7 +258,7 @@ class MainActivity:Activity() {
         setPadding(dp(8),dp(9),dp(8),dp(9))
         background=rounded(if(r.id==selectedRemoteId)0xFF234330.toInt() else 0xFF252B2F.toInt(),20)
       }
-      val typeLabel=when(r.type){"PHILIPS"->"Philips • RC6";"RC5"->"Universal • RC5";else->"Universal • RC6"}
+      val typeLabel=when(r.type){"PHILIPS"->"Philips • RC6";"DGTEC"->"DGTEC • DG-FV42LCD";"RC5"->"Universal • RC5";else->"Universal • RC6"}
       wrapper.addView(label(r.name,17f,Color.WHITE))
       wrapper.addView(label(typeLabel,12f,Color.LTGRAY))
       val row=LinearLayout(this)
@@ -272,7 +272,7 @@ class MainActivity:Activity() {
       wrapper.addView(row)
       page.addView(wrapper,LinearLayout.LayoutParams(-1,-2).apply{setMargins(dp(5),dp(4),dp(5),dp(8))})
     }
-    page.addView(label("v1.0.0  •  Remotes saved on this phone",12f,Color.LTGRAY))
+    page.addView(label("v1.1.0  •  Remotes saved on this phone",12f,Color.LTGRAY))
   }
   private fun nameInput(default:String=""):EditText =
     EditText(this).apply {
@@ -283,8 +283,8 @@ class MainActivity:Activity() {
 
   private fun addRemoteDialog(){
     val input=nameInput()
-    val labels=arrayOf("Philips (RC6)","Universal (RC6)","Universal (RC5)")
-    val types=arrayOf("PHILIPS","RC6","RC5")
+    val labels=arrayOf("Philips (RC6)","Universal (RC6)","Universal (RC5)","DGTEC DG-FV42LCD (test)")
+    val types=arrayOf("PHILIPS","RC6","RC5","DGTEC")
     val chooser=Spinner(this).apply{
       adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,labels)
       setSelection(0)
@@ -362,12 +362,64 @@ class MainActivity:Activity() {
   }
   private fun send(name:String){
     if(!ir.hasIrEmitter())return
+    if(selectedRemote().type=="DGTEC"){dgSend(name);return}
     val c=mapOf("POWER" to 12,"MUTE" to 13,"VOL+" to 16,"VOL-" to 17,"CH+" to 32,"CH-" to 33,
       "UP" to 88,"DOWN" to 89,"LEFT" to 90,"RIGHT" to 91,"OK" to 92,"MENU" to 82,
       "BACK" to 10,"HOME" to 54,"SOURCE" to 56)[name]?:return
     toggle=1-toggle
     try{ir.transmit(36000,if(!philipsActive && profile=="RC5")rc5(c)else rc6(c))}
     catch(e:Exception){Toast.makeText(this,"IR error",Toast.LENGTH_SHORT).show()}
+  }
+  private val dgKeys=listOf("POWER","MUTE","VOL+","VOL-","CH+","CH-","SOURCE","MENU","BACK","HOME","UP","DOWN","LEFT","RIGHT","OK","0","1","2","3","4","5","6","7","8","9","DTV/ATV","EPG","DISPLAY")
+  private fun dgPrefs()=getSharedPreferences("dgtec_"+selectedRemoteId,MODE_PRIVATE)
+  private fun dgSend(key:String){
+    val p=dgPrefs()
+    val a=p.getInt(key+"_a",-1);val c=p.getInt(key+"_c",-1)
+    if(a>=0 && c>=0)nec(a,c)
+    else {Toast.makeText(this,"Set up "+key+" first",Toast.LENGTH_SHORT).show();dgSetup(key)}
+  }
+  private fun showDgtec(){
+    page.removeAllViews()
+    page.addView(RemoteFace(false),LinearLayout.LayoutParams(-1,-2))
+    for(group in (listOf("1","2","3","4","5","6","7","8","9","DTV/ATV","0","EPG","DISPLAY")).chunked(3)){
+      val row=LinearLayout(this)
+      group.forEach{key->row.addView(btn(key,0xFF394146.toInt(),15f){dgSend(key)},LinearLayout.LayoutParams(0,dp(48),1f))}
+      page.addView(row)
+    }
+    page.addView(btn("SET UP / TEST IR BUTTONS",0xFF255E38.toInt(),15f){
+      AlertDialog.Builder(this).setTitle("Choose a button to configure").setItems(dgKeys.toTypedArray()){_,i->dgSetup(dgKeys[i])}.show()
+    },LinearLayout.LayoutParams(-1,dp(56)))
+    page.addView(label("Experimental NEC profiles • test against your TV",12f,Color.LTGRAY))
+  }
+  private fun dgSetup(key:String){
+    val p=dgPrefs()
+    val area=col().apply{setPadding(dp(16),dp(8),dp(16),dp(8))}
+    val address=EditText(this).apply{inputType=2;hint="Address 0–255";setText(p.getInt(key+"_a",p.getInt("POWER_a",0)).toString())}
+    val command=EditText(this).apply{inputType=2;hint="Command 0–255";setText(p.getInt(key+"_c",0).toString())}
+    area.addView(label("NEC address (decimal)",14f,Color.LTGRAY));area.addView(address)
+    area.addView(label("Command (decimal)",14f,Color.LTGRAY));area.addView(command)
+    fun pair():Pair<Int,Int>?{
+      val a=address.text.toString().toIntOrNull();val c=command.text.toString().toIntOrNull()
+      if(a==null||c==null||a !in 0..255||c !in 0..255){Toast.makeText(this,"Enter values 0–255",Toast.LENGTH_SHORT).show();return null}
+      return a to c
+    }
+    fun test(){val v=pair()?:return;if(ir.hasIrEmitter())nec(v.first,v.second)}
+    area.addView(btn("TEST",0xFF255E38.toInt(),15f){test()})
+    area.addView(btn("NEXT COMMAND + TEST",0xFF41484D.toInt(),15f){
+      val v=pair()
+      if(v!=null){command.setText(((v.second+1)%256).toString());test()}
+    })
+    var scanIndex=0
+    if(key=="POWER")area.addView(btn("NEXT POWER CANDIDATE + TEST",0xFF41484D.toInt(),14f){
+      val v=codes[scanIndex++ % codes.size];address.setText(v.first.toString());command.setText(v.second.toString());test()
+    })
+    val dialog=AlertDialog.Builder(this).setTitle("Configure "+key).setView(area)
+      .setNegativeButton("CANCEL",null).setPositiveButton("SAVE WORKING CODE",null).create()
+    dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+      val v=pair()
+      if(v!=null){p.edit().putInt(key+"_a",v.first).putInt(key+"_c",v.second).apply();dialog.dismiss()}
+    }}
+    dialog.show()
   }
   private fun duration(halves:List<Int>,u:Int):IntArray{
     val p=mutableListOf<Int>();var state=1;var n=0
