@@ -95,7 +95,7 @@ class MainActivity:Activity() {
       page.addView(btn("START / STOP AUTO SEARCH",0xFF45474D.toInt(),14f){if(searching)stop()else start()},LinearLayout.LayoutParams(-1,dp(55)))
       page.addView(btn("TV RESPONDED - STOP & SAVE",0xFF45474D.toInt(),14f){saveCode()},LinearLayout.LayoutParams(-1,dp(55)))
     }
-    page.addView(label("v1.1.0  •  Saved remote codes",12f,Color.LTGRAY))
+    page.addView(label("v1.2.0  •  Saved remote codes",12f,Color.LTGRAY))
   }
 
   private inner class RemoteFace(private val philips:Boolean):View(this@MainActivity) {
@@ -272,7 +272,7 @@ class MainActivity:Activity() {
       wrapper.addView(row)
       page.addView(wrapper,LinearLayout.LayoutParams(-1,-2).apply{setMargins(dp(5),dp(4),dp(5),dp(8))})
     }
-    page.addView(label("v1.1.0  •  Remotes saved on this phone",12f,Color.LTGRAY))
+    page.addView(label("v1.2.0  •  Remotes saved on this phone",12f,Color.LTGRAY))
   }
   private fun nameInput(default:String=""):EditText =
     EditText(this).apply {
@@ -375,11 +375,12 @@ class MainActivity:Activity() {
   private fun dgSend(key:String){
     val p=dgPrefs()
     val a=p.getInt(key+"_a",-1);val c=p.getInt(key+"_c",-1)
-    if(a>=0 && c>=0)nec(a,c)
+    if(a>=0 && c>=0)dgTransmit(p.getString(key+"_protocol","NEC")?:"NEC",a,c)
     else {Toast.makeText(this,"Set up "+key+" first",Toast.LENGTH_SHORT).show();dgSetup(key)}
   }
   private fun showDgtec(){
     page.removeAllViews()
+    page.addView(btn("AUTO FIND TV POWER CODE",0xFF255E38.toInt(),16f){dgScan()},LinearLayout.LayoutParams(-1,dp(56)))
     page.addView(RemoteFace(false),LinearLayout.LayoutParams(-1,-2))
     for(group in (listOf("1","2","3","4","5","6","7","8","9","DTV/ATV","0","EPG","DISPLAY")).chunked(3)){
       val row=LinearLayout(this)
@@ -389,35 +390,110 @@ class MainActivity:Activity() {
     page.addView(btn("SET UP / TEST IR BUTTONS",0xFF255E38.toInt(),15f){
       AlertDialog.Builder(this).setTitle("Choose a button to configure").setItems(dgKeys.toTypedArray()){_,i->dgSetup(dgKeys[i])}.show()
     },LinearLayout.LayoutParams(-1,dp(56)))
-    page.addView(label("Experimental NEC profiles • test against your TV",12f,Color.LTGRAY))
+    page.addView(label("Experimental multi-protocol search • test against your TV",12f,Color.LTGRAY))
+  }
+  private data class DgCode(val protocol:String,val address:Int,val command:Int)
+  private val dgProtocols=arrayOf("NEC","NEC extended","RC5","RC6")
+  private fun dgTransmit(protocol:String,a:Int,c:Int):Boolean {
+    if(!ir.hasIrEmitter())return false
+    try {
+      toggle=1-toggle
+      when(protocol){
+        "RC5"->ir.transmit(36000,rc5(c,a))
+        "RC6"->ir.transmit(36000,rc6(c,a))
+        else->{
+          val p=mutableListOf(9000,4500)
+          val bytes=if(protocol=="NEC extended")listOf(a and 255,(a shr 8) and 255,c,c xor 255) else listOf(a,a xor 255,c,c xor 255)
+          bytes.forEach{v->for(i in 0..7){p.add(560);p.add(if(((v shr i) and 1)==1)1690 else 560)}}
+          p.add(560);p.add(10000);ir.transmit(38000,p.toIntArray())
+        }
+      }
+      return true
+    } catch(e:Exception){return false}
+  }
+  private fun dgSave(p:android.content.SharedPreferences,key:String,v:DgCode){
+    p.edit().putInt(key+"_a",v.address).putInt(key+"_c",v.command).putString(key+"_protocol",v.protocol).apply()
+  }
+  private fun dgScan(){
+    if(!ir.hasIrEmitter()){Toast.makeText(this,"No IR transmitter",Toast.LENGTH_SHORT).show();return}
+    val prefs=dgPrefs()
+    val powerCommands=listOf(0x12,0x08,0x0C,0x45,0x40,0x46,0x47,0x44,0x43,0x07,0x15,0x09,0x16,0x19,0x0D,0x18,0x5E,0x1C,0x5A,0x42,0x52,0x14,0x0F,0x57,0x17)
+    val preferred=listOf(0,4,1,2,8,16,32,64,128,255,7,10,20)
+    val addresses=(preferred+(0..255).toList()).distinct()
+    val extended=listOf(0x00FF,0xFF00,0xBF00,0xDF00,0xEF00,0xF700,0xFB00,0xFD00,0xFE00,0x807F,0x7F80,0x04FB,0x20DF,0x40BF,0x10EF,0x00BF,0x00DF,0x00EF,0x0000,0xFFFF,0x0100,0x0200,0x0400,0x0800,0x1000,0x2000,0x4000,0x8000)
+    val candidates=buildList {
+      for(a in 0..31)add(DgCode("RC5",a,12))
+      for(a in addresses)add(DgCode("RC6",a,12))
+      for(a in preferred)for(c in powerCommands)add(DgCode("NEC",a,c))
+      for(a in extended)for(c in powerCommands)add(DgCode("NEC extended",a,c))
+      for(a in addresses.filter{it !in preferred})for(c in powerCommands)add(DgCode("NEC",a,c))
+    }
+    val area=col().apply{setPadding(dp(12),dp(6),dp(12),0)}
+    val info=label("Point your phone at the TV. Start scanning and pause when it responds.",14f,Color.LTGRAY)
+    area.addView(info)
+    var index=prefs.getInt("scan_position",0).coerceIn(0,candidates.size)
+    var last:DgCode?=null
+    var running=false
+    val scanHandler=Handler(Looper.getMainLooper())
+    fun display(){
+      val v=last
+      info.text=if(v==null)"Ready: "+index+" / "+candidates.size else index.toString()+" / "+candidates.size+" • "+v.protocol+" • Address "+v.address+" • Command "+v.command
+    }
+    val tick=object:Runnable{
+      override fun run(){
+        if(!running)return
+        if(index>=candidates.size){running=false;info.text="Candidate search finished. No more preset codes.";return}
+        val v=candidates[index]
+        if(!dgTransmit(v.protocol,v.address,v.command)){running=false;info.text="IR transmission failed";return}
+        last=v;index++;prefs.edit().putInt("scan_position",index).apply();display()
+        scanHandler.postDelayed(this,1800)
+      }
+    }
+    fun pause(){running=false;scanHandler.removeCallbacks(tick)}
+    area.addView(btn("START / RESUME",0xFF255E38.toInt(),15f){if(!running){running=true;scanHandler.post(tick)}})
+    area.addView(btn("PAUSE / TV RESPONDED",0xFF41484D.toInt(),15f){pause()})
+    area.addView(btn("RETEST LAST CODE",0xFF41484D.toInt(),15f){pause();last?.let{dgTransmit(it.protocol,it.address,it.command)}})
+    area.addView(btn("PREVIOUS CODE + TEST",0xFF41484D.toInt(),14f){
+      pause();if(index>1){index--;last=candidates[index-1];last?.let{dgTransmit(it.protocol,it.address,it.command)};prefs.edit().putInt("scan_position",index).apply();display()}
+    })
+    area.addView(btn("RESTART SEARCH",0xFF41484D.toInt(),14f){pause();index=0;last=null;prefs.edit().putInt("scan_position",0).apply();display()})
+    display()
+    val dialog=AlertDialog.Builder(this).setTitle("DGTEC automatic power search").setView(area).setNegativeButton("STOP / CLOSE",null).setPositiveButton("SAVE WORKING CODE",null).create()
+    dialog.setOnDismissListener{pause()}
+    dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+      pause();val v=last
+      if(v!=null){dgSave(prefs,"POWER",v);dialog.dismiss();Toast.makeText(this,"Power protocol saved",Toast.LENGTH_SHORT).show()}
+      else Toast.makeText(this,"Test a code first",Toast.LENGTH_SHORT).show()
+    }}
+    dialog.show()
   }
   private fun dgSetup(key:String){
     val p=dgPrefs()
-    val area=col().apply{setPadding(dp(16),dp(8),dp(16),dp(8))}
-    val address=EditText(this).apply{inputType=2;hint="Address 0–255";setText(p.getInt(key+"_a",p.getInt("POWER_a",0)).toString())}
-    val command=EditText(this).apply{inputType=2;hint="Command 0–255";setText(p.getInt(key+"_c",0).toString())}
-    area.addView(label("NEC address (decimal)",14f,Color.LTGRAY));area.addView(address)
-    area.addView(label("Command (decimal)",14f,Color.LTGRAY));area.addView(command)
-    fun pair():Pair<Int,Int>?{
-      val a=address.text.toString().toIntOrNull();val c=command.text.toString().toIntOrNull()
-      if(a==null||c==null||a !in 0..255||c !in 0..255){Toast.makeText(this,"Enter values 0–255",Toast.LENGTH_SHORT).show();return null}
-      return a to c
+    val area=col().apply{setPadding(dp(16),dp(8),dp(16),0)}
+    val protocol=Spinner(this).apply{
+      adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,dgProtocols)
+      setSelection(dgProtocols.indexOf(p.getString(key+"_protocol",p.getString("POWER_protocol","NEC"))).coerceAtLeast(0))
     }
-    fun test(){val v=pair()?:return;if(ir.hasIrEmitter())nec(v.first,v.second)}
+    val address=EditText(this).apply{inputType=2;hint="Address (decimal)";setText(p.getInt(key+"_a",p.getInt("POWER_a",0)).toString())}
+    val command=EditText(this).apply{inputType=2;hint="Command (decimal)";setText(p.getInt(key+"_c",0).toString())}
+    area.addView(label("Protocol",14f,Color.LTGRAY));area.addView(protocol)
+    area.addView(label("Address (decimal)",14f,Color.LTGRAY));area.addView(address)
+    area.addView(label("Command (decimal)",14f,Color.LTGRAY));area.addView(command)
+    fun value():DgCode?{
+      val pr=dgProtocols[protocol.selectedItemPosition];val a=address.text.toString().toIntOrNull();val c=command.text.toString().toIntOrNull()
+      val maxA=when(pr){"RC5"->31;"NEC extended"->65535;else->255}
+      val maxC=if(pr=="RC5")127 else 255
+      if(a==null||c==null||a !in 0..maxA||c !in 0..maxC){Toast.makeText(this,"Invalid address or command for "+pr,Toast.LENGTH_SHORT).show();return null}
+      return DgCode(pr,a,c)
+    }
+    fun test(){val v=value()?:return;if(!dgTransmit(v.protocol,v.address,v.command))Toast.makeText(this,"IR transmission failed",Toast.LENGTH_SHORT).show()}
     area.addView(btn("TEST",0xFF255E38.toInt(),15f){test()})
     area.addView(btn("NEXT COMMAND + TEST",0xFF41484D.toInt(),15f){
-      val v=pair()
-      if(v!=null){command.setText(((v.second+1)%256).toString());test()}
+      val v=value();if(v!=null){command.setText(((v.command+1)%(if(v.protocol=="RC5")128 else 256)).toString());test()}
     })
-    var scanIndex=0
-    if(key=="POWER")area.addView(btn("NEXT POWER CANDIDATE + TEST",0xFF41484D.toInt(),14f){
-      val v=codes[scanIndex++ % codes.size];address.setText(v.first.toString());command.setText(v.second.toString());test()
-    })
-    val dialog=AlertDialog.Builder(this).setTitle("Configure "+key).setView(area)
-      .setNegativeButton("CANCEL",null).setPositiveButton("SAVE WORKING CODE",null).create()
+    val dialog=AlertDialog.Builder(this).setTitle("Configure "+key).setView(area).setNegativeButton("CANCEL",null).setPositiveButton("SAVE WORKING CODE",null).create()
     dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
-      val v=pair()
-      if(v!=null){p.edit().putInt(key+"_a",v.first).putInt(key+"_c",v.second).apply();dialog.dismiss()}
+      val v=value();if(v!=null){dgSave(p,key,v);dialog.dismiss()}
     }}
     dialog.show()
   }
@@ -427,17 +503,17 @@ class MainActivity:Activity() {
     p.add(n);if(p.size%2==1)p.add(u)
     return p.toIntArray()
   }
-  private fun rc5(cmd:Int):IntArray{
-    val word=(1 shl 13) or ((if(cmd<64)1 else 0) shl 12) or (toggle shl 11) or (cmd and 63)
+  private fun rc5(cmd:Int,address:Int=0):IntArray{
+    val word=(1 shl 13) or ((if(cmd<64)1 else 0) shl 12) or (toggle shl 11) or ((address and 31) shl 6) or (cmd and 63)
     val halves=mutableListOf<Int>()
     for(i in 13 downTo 0){val bit=(word shr i) and 1;halves.add(bit);halves.add(1-bit)}
     return duration(halves,889)
   }
-  private fun rc6(cmd:Int):IntArray{
+  private fun rc6(cmd:Int,address:Int=0):IntArray{
     val h=mutableListOf<Int>()
     fun bit(v:Int,width:Int=1){repeat(width){h.add(v)};repeat(width){h.add(1-v)}}
     bit(1);repeat(3){bit(0)};bit(toggle,2)
-    repeat(8){bit(0)}
+    for(i in 7 downTo 0)bit((address shr i) and 1)
     for(i in 7 downTo 0)bit((cmd shr i) and 1)
     return intArrayOf(2664,888)+duration(h,444)
   }
